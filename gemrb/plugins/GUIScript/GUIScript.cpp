@@ -54,6 +54,7 @@
 #include "GUI/MapControl.h"
 #include "GUI/ScrollBar.h"
 #include "GUI/Slider.h"
+#include "GUI/TBCPanelControl.h"
 #include "GUI/TextArea.h"
 #include "GUI/TextEdit.h"
 #include "GUI/WindowManager.h"
@@ -2104,6 +2105,9 @@ static PyObject* GemRB_CreateView(PyObject* /*self*/, PyObject* args)
 				}
 				view = new Console(rgn, GetView<TextArea>(pyta));
 			}
+			break;
+		case IE_GUI_TBCPANEL:
+			view = new TBCPanelControl(rgn);
 			break;
 		case IE_GUI_INVALID:
 			view = core->GetWindowManager()->CreateWindow((unsigned short) id, rgn);
@@ -4775,7 +4779,7 @@ static PyObject* GemRB_GetGameTime(PyObject* /*self*/, PyObject* /*args*/)
 {
 	GET_GAME();
 
-	unsigned long GameTime = game->GameTime / core->Time.defaultTicksPerSec;
+	unsigned long GameTime = game->GetGameTimeReal() / core->Time.defaultTicksPerSec;
 	return PyLong_FromLong(GameTime);
 }
 
@@ -10941,6 +10945,13 @@ static PyObject* GemRB_SetEquippedQuickSlot(PyObject* /*self*/, PyObject* args)
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
 
+	// TBC: Switching weapons costs a free action
+	if (core->IsTurnBased() && actor->InInitiativeList()) {
+		if (!core->tbcManager.UseFreeAction()) {
+			Py_RETURN_NONE;
+		}
+	}
+
 	const CREItem* item = actor->inventory.GetUsedWeapon(false, dummy);
 	if (item && (item->Flags & IE_INV_ITEM_CURSED)) {
 		displaymsg->DisplayConstantString(HCStrings::Cursed, GUIColors::WHITE);
@@ -11112,6 +11123,23 @@ static PyObject* GemRB_SetModalState(PyObject* /*self*/, PyObject* args)
 	PARSE_ARGS(args, "ii|O", &globalID, &state, &spell);
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
+
+	// TBC: Modal actions cost action points (only when entering, not when already active)
+	if ((Modal) state != Modal::None && actor->Modal.State != (Modal) state && core->IsTurnBased() && actor->InInitiativeList()) {
+		if ((Modal) state == Modal::Stealth && actor->GetThiefLevel() > 0) {
+			// Stealth for thieves costs free action
+			if (!core->tbcManager.HasFreeAction()) {
+				Py_RETURN_NONE;
+			}
+			core->tbcManager.UseFreeAction();
+		} else {
+			// All other modal actions cost main action
+			if (!core->tbcManager.HasMainAction()) {
+				Py_RETURN_NONE;
+			}
+			core->tbcManager.UseMainAction();
+		}
+	}
 
 	actor->SetModal((Modal) state, false);
 	actor->SetModalSpell((Modal) state, ResRefFromPy(spell));

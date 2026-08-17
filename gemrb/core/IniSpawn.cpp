@@ -806,7 +806,7 @@ void IniSpawn::SpawnGroup(SpawnEntry& event) const
 		return;
 	}
 	unsigned int interval = event.interval;
-	ieDword gameTime = core->GetGame()->GameTime;
+	ieDword gameTime = core->GetGame()->GetGameTime();
 	// gameTime can be 0 for the first area, so make sure to not exit prematurely
 	if (interval && gameTime) {
 		if (event.lastSpawndate + interval >= gameTime) {

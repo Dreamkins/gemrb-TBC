@@ -1015,7 +1015,7 @@ inline int HandlePercentageDamage(Effect* fx, const Actor* target)
 	int damage = 0;
 	if (fx->Parameter2 == RPD_PERCENT && fx->FirstApply) {
 		// distribute the damage to one second intervals
-		int seconds = (fx->Duration - core->GetGame()->GameTime) / core->Time.defaultTicksPerSec;
+		int seconds = (fx->Duration - core->GetGame()->GetGameTime()) / core->Time.defaultTicksPerSec;
 		damage = target->GetStat(IE_MAXHITPOINTS) * fx->Parameter1 / 100;
 		fx->Parameter1 = static_cast<ieDword>(damage / seconds);
 	}
@@ -2004,7 +2004,7 @@ int fx_set_poisoned_state(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 		if (fx->FirstApply) {
 			fx->Parameter5 = totalDamage;
 			if (fx->Parameter1 == 0) fx->Parameter1++;
-		} else if (core->GetGame()->GameTime % timeStep == 0) { // only if we're dealing damage in this run
+		} else if (core->GetGame()->GetGameTime() % timeStep == 0) { // only if we're dealing damage in this run
 			if (signed(fx->Parameter5) <= 0) return FX_ABORT;
 			fx->Parameter5 -= fx->Parameter1;
 		}
@@ -2062,7 +2062,7 @@ int fx_set_poisoned_state(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 
 	// all damage is at most per-second
 	tmp *= timeStep;
-	if (tmp && (core->GetGame()->GameTime % tmp)) {
+	if (tmp && (core->GetGame()->GetGameTime() % tmp)) {
 		return FX_APPLIED;
 	}
 
@@ -2266,7 +2266,7 @@ int fx_set_unconscious_state(Scriptable* Owner, Actor* target, Effect* fx)
 	if (fx->FirstApply) {
 		target->ApplyEffectCopy(fx, fx_animation_stance_ref, Owner, 0, IE_ANI_SLEEP);
 		Effect* standUp = EffectQueue::CreateEffect(fx_animation_stance_ref, 0, IE_ANI_GET_UP, FX_DURATION_DELAY_LIMITED);
-		standUp->Duration = (fx->Duration - core->GetGame()->GameTime) / core->Time.defaultTicksPerSec;
+		standUp->Duration = (fx->Duration - core->GetGame()->GetGameTime()) / core->Time.defaultTicksPerSec;
 		core->ApplyEffect(standUp, target, target);
 	}
 
@@ -2435,7 +2435,7 @@ static int power_word_stun_iwd2(Actor* target, Effect* fx)
 	}
 	fx->Parameter2 = 0;
 	fx->TimingMode = FX_DURATION_ABSOLUTE;
-	fx->Duration = stuntime * core->Time.round_size + core->GetGame()->GameTime;
+	fx->Duration = stuntime * core->Time.round_size + core->GetGame()->GetGameTime();
 	STATE_SET(STATE_STUNNED);
 	STAT_SET(IE_HELD, 1);
 	target->AddPortraitIcon(PI_STUN_IWD);
@@ -3124,7 +3124,7 @@ int fx_set_blind_state(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 			stat = core->Roll(1, 30, 15);
 		} else
 			stat = 0;
-		fx->Duration = core->GetGame()->GameTime + stat;
+		fx->Duration = core->GetGame()->GetGameTime() + stat;
 	}
 
 	//don't do this effect twice (bug exists in BG2, but fixed in IWD2)
@@ -3213,7 +3213,7 @@ int fx_set_diseased_state(Scriptable* Owner, Actor* target, Effect* fx)
 	switch (fx->Parameter2) {
 		case RPD_SECONDS:
 			damage = 1;
-			if (fx->Parameter1 && (core->GetGame()->GameTime % target->GetAdjustedTime(fx->Parameter1 * aRound))) {
+			if (fx->Parameter1 && (core->GetGame()->GetGameTime() % target->GetAdjustedTime(fx->Parameter1 * aRound))) {
 				return FX_APPLIED;
 			}
 			break;
@@ -3221,7 +3221,7 @@ int fx_set_diseased_state(Scriptable* Owner, Actor* target, Effect* fx)
 		case RPD_POINTS:
 			damage = fx->Parameter1;
 			// per second
-			if (core->GetGame()->GameTime % target->GetAdjustedTime(aRound)) {
+			if (core->GetGame()->GetGameTime() % target->GetAdjustedTime(aRound)) {
 				return FX_APPLIED;
 			}
 			break;
@@ -3267,7 +3267,7 @@ int fx_set_diseased_state(Scriptable* Owner, Actor* target, Effect* fx)
 		case RPD_MOLD: //mold touch (how)
 			EXTSTATE_SET(EXTSTATE_MOLD);
 			target->SetSpellState(SS_MOLDTOUCH);
-			if (core->GetGame()->GameTime % target->GetAdjustedTime(aRound)) {
+			if (core->GetGame()->GetGameTime() % target->GetAdjustedTime(aRound)) {
 				return FX_APPLIED;
 			}
 			if (fx->Parameter1 < 1) {
@@ -3284,7 +3284,7 @@ int fx_set_diseased_state(Scriptable* Owner, Actor* target, Effect* fx)
 		default:
 			damage = 1;
 			// per second
-			if (core->GetGame()->GameTime % target->GetAdjustedTime(aRound)) {
+			if (core->GetGame()->GetGameTime() % target->GetAdjustedTime(aRound)) {
 				return FX_APPLIED;
 			}
 			break;
@@ -3552,7 +3552,7 @@ int fx_set_regenerating_state(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 	// print("fx_set_regenerating_state(%2d): Mod: %d, Type: %d", fx->Opcode, fx->Parameter1, fx->Parameter2);
 	int damage;
 	int tmp = fx->Parameter1;
-	ieDword gameTime = core->GetGame()->GameTime;
+	ieDword gameTime = core->GetGame()->GetGameTime();
 	// fx->Parameter4 is an optional frequency multiplier
 	ieDword aRound = (fx->Parameter4 ? fx->Parameter4 : 1) * core->Time.defaultTicksPerSec;
 	tick_t timeStep = target->GetAdjustedTime(aRound);
@@ -4663,7 +4663,7 @@ int fx_casting_glow(Scriptable* Owner, Actor* target, Effect* fx)
 		sca->ZOffset = int(heightmod);
 		sca->SetBlend();
 		if (fx->Duration) {
-			sca->SetDefaultDuration(fx->Duration - core->GetGame()->GameTime);
+			sca->SetDefaultDuration(fx->Duration - core->GetGame()->GetGameTime());
 		} else {
 			sca->SetDefaultDuration(10000);
 		}
@@ -4677,7 +4677,7 @@ int fx_casting_glow(Scriptable* Owner, Actor* target, Effect* fx)
 
 	// Resource contains the termination sound from when used from GameScript::SpellCastEffect
 	// the channel is a guess
-	if (fx->Duration - core->GetGame()->GameTime == 1 && !fx->Resource.IsEmpty()) {
+	if (fx->Duration - core->GetGame()->GetGameTime() == 1 && !fx->Resource.IsEmpty()) {
 		core->GetAudioPlayback().Play(fx->Resource, AudioPreset::Spatial, SFXChannel::Hits, target->Pos);
 	}
 
@@ -5243,6 +5243,7 @@ int fx_pause_target(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 	}
 
 	STAT_MOD(IE_CASTERHOLD); // the actual pausing is done elsewhere
+
 	return FX_PERMANENT;
 }
 
@@ -6085,7 +6086,7 @@ int fx_power_word_stun(Scriptable* Owner, Actor* target, Effect* fx)
 	//delay will be calculated as 1dx/2dx/3dx
 	//depending on the current hitpoints (or the stat in param2)
 	stat = core->Roll(stat, x ? x : 4, 0) * core->Time.round_size;
-	fx->Duration = core->GetGame()->GameTime + stat;
+	fx->Duration = core->GetGame()->GetGameTime() + stat;
 	fx->TimingMode = FX_DURATION_ABSOLUTE;
 	fx->Opcode = EffectQueue::ResolveEffect(fx_set_stun_state_ref);
 	return fx_set_stun_state(Owner, target, fx);
@@ -6147,7 +6148,7 @@ int fx_maze(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 			int stat = target->GetSafeStat(IE_INT);
 			int size = core->GetIntelligenceBonus(3, stat);
 			int dice = core->GetIntelligenceBonus(4, stat);
-			fx->Duration = game->GameTime + target->LuckyRoll(dice, size, 0, LR_NEGATIVE) * core->Time.round_size;
+			fx->Duration = game->GetGameTime() + target->LuckyRoll(dice, size, 0, LR_NEGATIVE) * core->Time.round_size;
 
 			// fix the effect from being FX_DURATION_DELAY_PERMANENT to a non-oneshot
 			// needed for the bg2 version of the maze spell (spwi813)
@@ -6233,10 +6234,10 @@ int fx_play_visual_effect(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 	}
 
 	if (fx->TimingMode != FX_DURATION_INSTANT_PERMANENT) {
-		sca->SetDefaultDuration(fx->Duration - core->GetGame()->GameTime);
+		sca->SetDefaultDuration(fx->Duration - core->GetGame()->GetGameTime());
 		if (!(sca->SequenceFlags & IE_VVC_LOOP) && sca->anims[P_HOLD * MAX_ORIENT]) {
 			// shorten effect duration to match vvc; Duration is sensible only for looping or frozen looping vvcs
-			fx->Duration = sca->anims[P_HOLD * MAX_ORIENT]->GetFrameCount() + core->GetGame()->GameTime;
+			fx->Duration = sca->anims[P_HOLD * MAX_ORIENT]->GetFrameCount() + core->GetGame()->GetGameTime();
 		}
 	}
 	if (fx->Parameter2 == 1) {
@@ -6332,7 +6333,7 @@ int fx_power_word_sleep(Scriptable* Owner, Actor* target, Effect* fx)
 	}
 	//translate this effect to a normal sleep effect
 	//recalculate delay
-	fx->Duration = core->GetGame()->GameTime + x * core->Time.round_size;
+	fx->Duration = core->GetGame()->GetGameTime() + x * core->Time.round_size;
 	fx->TimingMode = FX_DURATION_ABSOLUTE;
 	fx->Opcode = EffectQueue::ResolveEffect(fx_set_sleep_state_ref);
 	if (!core->HasFeature(GFFlags::HAS_EE_EFFECTS)) fx->Parameter2 = 0;
@@ -6515,7 +6516,7 @@ int fx_dispel_secondary_type_one(Scriptable* /*Owner*/, Actor* target, Effect* f
 int fx_timestop(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 {
 	// halve the duration :(
-	ieDword adjDuration = (fx->Duration - core->GetGame()->GameTime) / 2 + core->GetGame()->GameTime;
+	ieDword adjDuration = (fx->Duration - core->GetGame()->GetGameTime()) / 2 + core->GetGame()->GetGameTime();
 	core->GetGame()->TimeStop(target, adjDuration);
 	return FX_NOT_APPLIED;
 }
@@ -6730,7 +6731,7 @@ int fx_cast_spell_on_condition(Scriptable* Owner, Actor* target, Effect* fx)
 
 		// make sure we don't apply once per tick to the same target, potentially triggering 2 actor recursion
 		// there could be more than one tick in between successful triggers; trying with a half a round limit
-		if (entry && actor->GetGlobalID() == fx->Parameter4 && core->GetGame()->GameTime - fx->Parameter5 < core->Time.defaultTicksPerSec / 2) {
+		if (entry && actor->GetGlobalID() == fx->Parameter4 && core->GetGame()->GetGameTime() - fx->Parameter5 < core->Time.defaultTicksPerSec / 2) {
 			condition = false;
 			fx->Parameter4 = 0;
 			fx->Parameter5 = 0;
@@ -6766,7 +6767,7 @@ int fx_cast_spell_on_condition(Scriptable* Owner, Actor* target, Effect* fx)
 
 			// save a marker, so we can avoid two fireshielded mages almost instantly kill each other
 			fx->Parameter4 = actor->GetGlobalID();
-			fx->Parameter5 = core->GetGame()->GameTime;
+			fx->Parameter5 = core->GetGame()->GetGameTime();
 		}
 		Owner->SetSpellResRef(OldSpellResRef);
 
@@ -6856,11 +6857,11 @@ int fx_wing_buffet(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 	const Game* game = core->GetGame();
 
 	if (fx->FirstApply) {
-		fx->Parameter4 = game->GameTime;
+		fx->Parameter4 = game->GetGameTime();
 		return FX_APPLIED;
 	}
 
-	int ticks = game->GameTime - fx->Parameter4;
+	int ticks = game->GetGameTime() - fx->Parameter4;
 	if (!ticks)
 		return FX_APPLIED;
 
@@ -6895,7 +6896,7 @@ int fx_wing_buffet(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 
 	target->SetPosition(newpos, true);
 
-	fx->Parameter4 = game->GameTime;
+	fx->Parameter4 = game->GetGameTime();
 	return FX_APPLIED;
 }
 
@@ -7220,7 +7221,7 @@ int fx_create_item_days(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 		receiver = core->GetGame()->FindPC(1);
 	}
 	// duration needs recalculating into days
-	ieWord expiry = fx->Duration - core->GetGame()->GameTime;
+	ieWord expiry = fx->Duration - core->GetGame()->GetGameTime();
 	receiver->inventory.AddSlotItemRes(fx->Resource, SLOT_ONLYINVENTORY, fx->Parameter1, fx->Parameter3, fx->Parameter4, expiry);
 	return FX_NOT_APPLIED;
 }
@@ -7435,7 +7436,7 @@ int fx_screenshake(Scriptable* /*Owner*/, Actor* /*target*/, Effect* fx)
 	int count;
 
 	if (fx->TimingMode != FX_PERMANENT) {
-		count = fx->Duration - core->GetGame()->GameTime;
+		count = fx->Duration - core->GetGame()->GetGameTimeReal();
 	} else {
 		count = core->Time.round_size;
 	}
@@ -7511,14 +7512,14 @@ int fx_apply_effect_repeat(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 	switch (fx->Parameter2) {
 		case 0: //once per second
 		case 1: //crash???
-			if (!(core->GetGame()->GameTime % target->GetAdjustedTime(aRound))) {
+			if (!(core->GetGame()->GetGameTime() % target->GetAdjustedTime(aRound))) {
 				core->ApplyEffect(newfx, target, caster);
 			} else {
 				delete newfx;
 			}
 			break;
 		case 2: //param1 times every second
-			if (!(core->GetGame()->GameTime % target->GetAdjustedTime(aRound))) {
+			if (!(core->GetGame()->GetGameTime() % target->GetAdjustedTime(aRound))) {
 				for (ieDword i = 0; i < fx->Parameter1; i++) {
 					core->ApplyEffect(new Effect(*newfx), target, caster);
 				}
@@ -7526,14 +7527,14 @@ int fx_apply_effect_repeat(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 			delete newfx;
 			break;
 		case 3: //once every Param1 second
-			if (fx->Parameter1 && !(core->GetGame()->GameTime % target->GetAdjustedTime(fx->Parameter1 * aRound))) {
+			if (fx->Parameter1 && !(core->GetGame()->GetGameTime() % target->GetAdjustedTime(fx->Parameter1 * aRound))) {
 				core->ApplyEffect(newfx, target, caster);
 			} else {
 				delete newfx;
 			}
 			break;
 		case 4: //param3 times every Param1 second
-			if (fx->Parameter1 && !(core->GetGame()->GameTime % target->GetAdjustedTime(fx->Parameter1 * aRound))) {
+			if (fx->Parameter1 && !(core->GetGame()->GetGameTime() % target->GetAdjustedTime(fx->Parameter1 * aRound))) {
 				for (ieDword i = 0; i < fx->Parameter3; i++) {
 					core->ApplyEffect(new Effect(*newfx), target, caster);
 				}
@@ -8468,7 +8469,7 @@ int fx_slow_poison(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 				// it is (duration - gametime)*8+gametime;
 				// like the damage is spread for a longer time than
 				// it should
-				poison->Duration = poison->Duration * 8 - core->GetGame()->GameTime * 7;
+				poison->Duration = poison->Duration * 8 - core->GetGame()->GetGameTime() * 7;
 				poison->Parameter1 *= 7;
 				break;
 			case RPD_ROUNDS:
@@ -8575,7 +8576,7 @@ int fx_static_charge(Scriptable* Owner, Actor* target, Effect* fx)
 
 	// timing
 	fx->TimingMode = FX_DURATION_DELAY_PERMANENT;
-	fx->Duration = core->GetGame()->GameTime + delay;
+	fx->Duration = core->GetGame()->GetGameTime() + delay;
 	fx->Parameter1--;
 
 	// this effect is targeted on the caster, so we need to manually find a damage target

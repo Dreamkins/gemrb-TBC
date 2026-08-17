@@ -409,6 +409,7 @@ public:
 	bool AuraPolluted();
 	unsigned int GetVisualRange() const;
 	ieDword GetLocal(const ieVariable& key, ieDword fallback) const;
+	int DecreaseActionState();
 	virtual std::string dump() const = 0;
 	void SetPos(const NavmapPoint& pos)
 	{

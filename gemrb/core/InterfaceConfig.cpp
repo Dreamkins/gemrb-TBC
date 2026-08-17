@@ -165,6 +165,7 @@ CoreSettings LoadFromDictionary(InterfaceConfig cfg)
 	CONFIG_INT("CapFPS", config.CapFPS);
 	CONFIG_INT("FullScreen", config.FullScreen);
 	CONFIG_INT("EnableCheatKeys", config.CheatFlag);
+	CONFIG_INT("EnableTurnBased", config.EnableTurnBased);
 	CONFIG_INT("GCDebug", config.DebugFlags);
 	CONFIG_INT("GUIEnhancements", config.GUIEnhancements);
 	CONFIG_INT("Height", config.Height);

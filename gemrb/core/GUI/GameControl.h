@@ -132,7 +132,6 @@ private:
 	void HandleContainer(Container* container, Actor* actor);
 	void HandleDoor(Door* door, Actor* actor);
 
-	void UpdateCursor();
 	bool IsDisabledCursor() const override;
 
 	void PerformSelectedAction(const Point& p);
@@ -186,9 +185,12 @@ public:
 	void SetDisplayText(const String& text, unsigned int time);
 	void SetDisplayText(HCStrings text, unsigned int time);
 	void ClearMouseState();
+	Point ScreenMousePos() { return screenMousePos; }
 	Point GameMousePos() const;
 
 	Point ConvertPointFromScreen(const Point&) const override;
+	void UpdateCursor();
+
 	void MoveViewportUnlockedTo(Point, bool center);
 	bool MoveViewportTo(Point, bool center, int speed = 0);
 	Region Viewport() const;

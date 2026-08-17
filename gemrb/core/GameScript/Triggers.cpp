@@ -403,7 +403,7 @@ int GameScript::IsActive(Scriptable* Sender, const Trigger* parameters)
 
 	switch (scr->Type) {
 		case ST_ACTOR:
-			if (static_cast<const Actor*>(scr)->Schedule(core->GetGame()->GameTime, true)) return 1;
+			if (static_cast<const Actor*>(scr)->Schedule(core->GetGame()->GetGameTime(), true)) return 1;
 			return 0;
 		case ST_CONTAINER:
 			if (static_cast<const Container*>(scr)->Flags & CONT_DISABLED) return 0;
@@ -827,7 +827,7 @@ int GameScript::GlobalTimerExact(Scriptable* Sender, const Trigger* parameters)
 	bool valid = true;
 
 	ieDword value1 = CheckVariable(Sender, parameters->string0Parameter, parameters->string1Parameter, &valid);
-	if (valid && value1 == core->GetGame()->GameTime) return 1;
+	if (valid && value1 == core->GetGame()->GetGameTime()) return 1;
 	return 0;
 }
 
@@ -837,7 +837,7 @@ int GameScript::GlobalTimerExpired(Scriptable* Sender, const Trigger* parameters
 
 	ieDword value1 = CheckVariable(Sender, parameters->string0Parameter, parameters->string1Parameter, &valid);
 	if (valid && (core->HasFeature(GFFlags::ZERO_TIMER_IS_VALID) || value1)) {
-		if (value1 < core->GetGame()->GameTime) return 1;
+		if (value1 < core->GetGame()->GetGameTime()) return 1;
 	}
 	return 0;
 }
@@ -848,7 +848,7 @@ int GameScript::GlobalTimerNotExpired(Scriptable* Sender, const Trigger* paramet
 	bool valid = true;
 
 	ieDword value1 = CheckVariable(Sender, parameters->string0Parameter, parameters->string1Parameter, &valid);
-	if (valid && value1 && value1 > core->GetGame()->GameTime) return 1;
+	if (valid && value1 && value1 > core->GetGame()->GetGameTime()) return 1;
 	return 0;
 }
 
@@ -3258,7 +3258,7 @@ int GameScript::Time(Scriptable* /*Sender*/, const Trigger* parameters)
 	if (hour < 0 || hour > 23) return 0;
 
 	if (!hour) hour = 24;
-	return Schedule(1 << (hour - 1), core->GetGame()->GameTime);
+	return Schedule(1 << (hour - 1), core->GetGame()->GetGameTime());
 }
 
 //this trigger uses hours
@@ -3266,7 +3266,7 @@ int GameScript::TimeGT(Scriptable* /*Sender*/, const Trigger* parameters)
 {
 	if (parameters->int0Parameter < 0 || parameters->int0Parameter > 22) return 0;
 
-	return Schedule((0xFFFFFFu << parameters->int0Parameter) & 0x7FFFFFu, core->GetGame()->GameTime);
+	return Schedule((0xFFFFFFu << parameters->int0Parameter) & 0x7FFFFFu, core->GetGame()->GetGameTime());
 }
 
 //this trigger uses hours
@@ -3274,7 +3274,7 @@ int GameScript::TimeLT(Scriptable* /*Sender*/, const Trigger* parameters)
 {
 	if (parameters->int0Parameter < 1 || parameters->int0Parameter > 23) return 0;
 
-	return Schedule((0xFFFFFFu >> (25 - parameters->int0Parameter)) | 1 << 23, core->GetGame()->GameTime);
+	return Schedule((0xFFFFFFu >> (25 - parameters->int0Parameter)) | 1 << 23, core->GetGame()->GetGameTime());
 }
 
 int GameScript::HotKey(Scriptable* Sender, const Trigger* parameters)
@@ -3957,7 +3957,7 @@ int GameScript::Delay(Scriptable* Sender, const Trigger* parameters)
 
 int GameScript::TimeOfDay(Scriptable* /*Sender*/, const Trigger* parameters)
 {
-	int hour = core->Time.GetHour(core->GetGame()->GameTime);
+	int hour = core->Time.GetHour(core->GetGame()->GetGameTime());
 	enum {
 		TIMEOFDAY_DAY, /* 7-21 */
 		TIMEOFDAY_DUSK, /* 21-22 */
@@ -4229,7 +4229,7 @@ int GameScript::SpellCastOnMe(Scriptable* Sender, const Trigger* parameters)
 // gemrb extension
 int GameScript::CalendarDay(Scriptable* /*Sender*/, const Trigger* parameters)
 {
-	int day = core->GetCalendar()->GetCalendarDay(core->GetGame()->GameTime / core->Time.day_size);
+	int day = core->GetCalendar()->GetCalendarDay(core->GetGame()->GetGameTime() / core->Time.day_size);
 	if (day == parameters->int0Parameter) {
 		return 1;
 	}
@@ -4239,7 +4239,7 @@ int GameScript::CalendarDay(Scriptable* /*Sender*/, const Trigger* parameters)
 // gemrb extension
 int GameScript::CalendarDayGT(Scriptable* /*Sender*/, const Trigger* parameters)
 {
-	int day = core->GetCalendar()->GetCalendarDay(core->GetGame()->GameTime / core->Time.day_size);
+	int day = core->GetCalendar()->GetCalendarDay(core->GetGame()->GetGameTime() / core->Time.day_size);
 	if (day > parameters->int0Parameter) {
 		return 1;
 	}
@@ -4249,7 +4249,7 @@ int GameScript::CalendarDayGT(Scriptable* /*Sender*/, const Trigger* parameters)
 // gemrb extension
 int GameScript::CalendarDayLT(Scriptable* /*Sender*/, const Trigger* parameters)
 {
-	int day = core->GetCalendar()->GetCalendarDay(core->GetGame()->GameTime / core->Time.day_size);
+	int day = core->GetCalendar()->GetCalendarDay(core->GetGame()->GetGameTime() / core->Time.day_size);
 	if (day < parameters->int0Parameter) {
 		return 1;
 	}

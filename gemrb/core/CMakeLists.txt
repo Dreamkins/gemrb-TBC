@@ -67,6 +67,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	TileMap.cpp
 	TileOverlay.cpp
 	TraversabilityCache.cpp
+	TurnBasedCombatManager.cpp
 	VEFObject.cpp
 	WorldMap.cpp
 	GameScript/Actions.cpp
@@ -92,6 +93,7 @@ FILE(GLOB gemrb_core_LIB_SRCS
 	GUI/ScrollBar.cpp
 	GUI/ScrollView.cpp
 	GUI/Slider.cpp
+	GUI/TBCPanelControl.cpp
 	GUI/TextArea.cpp
 	GUI/TextEdit.cpp
 	GUI/TextSystem/Font.cpp

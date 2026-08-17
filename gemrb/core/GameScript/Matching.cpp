@@ -654,7 +654,7 @@ Targets* ClosestEnemySummoned(const Scriptable* origin, Targets* parameters, int
 	}
 
 	Actor* actor = nullptr;
-	ieDword gametime = core->GetGame()->GameTime;
+	ieDword gametime = core->GetGame()->GetGameTime();
 	while (t) {
 		Actor* tmp = (Actor*) (t->actor);
 		if (tmp->GetStat(IE_SEX) != SEX_SUMMON) {
@@ -706,7 +706,7 @@ Targets* XthNearestEnemyOfType(const Scriptable* origin, Targets* parameters, un
 		return parameters;
 	}
 
-	ieDword gametime = core->GetGame()->GameTime;
+	ieDword gametime = core->GetGame()->GetGameTime();
 	while (t) {
 		if (t->actor->Type != ST_ACTOR) {
 			t = parameters->RemoveTargetAt(m);

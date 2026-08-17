@@ -1822,7 +1822,7 @@ int AREImporter::PutHeader(DataStream* stream, const Map* map) const
 	}
 	stream->WriteResRef(signature);
 	stream->WriteResRef(map->WEDResRef);
-	uint32_t time = core->GetGame()->GameTime;
+	uint32_t time = core->GetGame()->GetGameTimeReal();
 	stream->WriteDword(time); //lastsaved
 	stream->WriteDword(map->AreaFlags);
 

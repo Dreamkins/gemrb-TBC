@@ -741,6 +741,27 @@ void Map::UpdateScripts()
 			continue;
 		}
 
+		if (core->IsTurnBased() && game->GetPCs().size() && !actor->IsPC() && EARelation(actor, game->GetPCs()[0]) == EAR_FRIEND) {
+			actor->MoveToInitiativeList();
+		}
+
+		//actor->ClearActions();
+		//actor->fxqueue.RemoveAllNonPermanentEffects();
+
+		if (core->IsTurnBased() && actor->InInitiativeList()) {
+			if (core->tbcManager.currentTurnBasedActor == actor) {
+				bool notPlayerControl = actor->Immobile() || (actor->GetStat(IE_EA) != EA_PC && actor->GetStat(IE_EA) != EA_FAMILIAR) || (actor->Modified[IE_STATE_ID] & (STATE_MINDLESS ^ STATE_BERSERK)) || (actor->GetBase(IE_STATE_ID) & (STATE_MINDLESS ^ STATE_BERSERK));
+				bool cantMove = core->tbcManager.opportunity || actor->GetRandomBackoff() || !actor->InMove() || actor->Immobile() || !actor->GetPath() || (actor->Modified[IE_STATE_ID] & STATE_CANTMOVE);
+				bool notAttackNow = !actor->InAttack();
+				if (notPlayerControl && cantMove && notAttackNow) {
+					const Actor* target = area->GetActorByGlobalID(objects.LastTarget);
+					if (actor->lastInit && game->GetGameTimeReal() - actor->lastInit > 20) {
+						core->EndTurn();
+					}
+				}
+			}
+		}
+
 		//Avenger moved this here from ApplyAllEffects (this one modifies the effect queue)
 		//.. but then fuzzie moved this here from UpdateActorState, because otherwise
 		//immobile actors (see check below) never become mobile again!
@@ -1175,7 +1196,7 @@ void Map::DrawMap(const Region& viewport, FogRenderer& fogRenderer, uint32_t dFl
 	debugFlags = dFlags;
 
 	Game* game = core->GetGame();
-	ieDword gametime = game->GameTime;
+	ieDword gametime = game->GetGameTimeReal();
 	static ieDword oldGameTime = 0;
 	bool timestop = game->IsTimestopActive();
 	if (core->HasFeature(GFFlags::HAS_EE_EFFECTS) && core->GetGameControl()->GetDialogueFlags() & DF_FREEZE_SCRIPTS) {
@@ -1430,6 +1451,8 @@ void Map::DrawMap(const Region& viewport, FogRenderer& fogRenderer, uint32_t dFl
 	if (debugFlags & (DEBUG_SHOW_WALLS_ALL | DEBUG_SHOW_DOORS_DISABLED)) {
 		DrawWallPolygons(viewport);
 	}
+
+	// The TBC initiative panel is drawn by TBCPanelControl (a subview of GameControl).
 }
 
 void Map::DrawOverheadText() const
@@ -1486,6 +1509,7 @@ void Map::DrawWallPolygons(const Region& viewport) const
 		}
 	}
 }
+
 
 WallPolygonSet Map::WallsIntersectingRegion(Region r, bool includeDisabled, const Point* loc) const
 {
@@ -1905,7 +1929,7 @@ int Map::CountSummons(ieDword flags, ieDword sex) const
 
 bool Map::AnyEnemyNearPoint(const Point& p) const
 {
-	ieDword gametime = core->GetGame()->GameTime;
+	ieDword gametime = core->GetGame()->GetGameTime();
 	for (const Actor* actor : actors) {
 		if (!actor->Schedule(gametime, true)) {
 			continue;
@@ -2001,7 +2025,7 @@ void Map::AddActor(Actor* actor, bool init)
 
 bool Map::AnyPCSeesEnemy() const
 {
-	ieDword gametime = core->GetGame()->GameTime;
+	ieDword gametime = core->GetGame()->GetGameTime();
 	for (const Actor* actor : actors) {
 		if (actor->Modified[IE_EA] >= EA_EVILCUTOFF) {
 			if (IsVisible(actor->Pos) && actor->Schedule(gametime, true)) {
@@ -2285,7 +2309,7 @@ void Map::PurgeArea(bool items)
 				continue;
 			}
 
-			if (ac->Timers.removalTime > core->GetGame()->GameTime) {
+			if (ac->Timers.removalTime > core->GetGame()->GetGameTime()) {
 				continue;
 			}
 
@@ -2589,7 +2613,6 @@ PathMapFlags Map::GetBlockedInRadiusTile(const SearchmapPoint& tp, uint16_t size
 	// We check a circle of radius size-2 around (px,py)
 	// TODO: recheck that this matches originals
 	// these circles are perhaps slightly different for sizes 7 and up.
-
 	PathMapFlags ret = PathMapFlags::IMPASSABLE;
 	size = Clamp<uint16_t>(size, 2, MAX_CIRCLESIZE);
 	uint16_t r = size - 2;
@@ -2834,7 +2857,7 @@ void Map::GenerateQueues()
 		queue[int(priority)].clear();
 	}
 
-	ieDword gametime = core->GetGame()->GameTime;
+	ieDword gametime = core->GetGame()->GetGameTimeReal();
 	bool hostilesNew = false;
 	while (i--) {
 		Actor* actor = actors[i];
@@ -3405,7 +3428,7 @@ void Map::TriggerSpawn(Spawn* spawn)
 	}
 
 	//check schedule
-	ieDword time = core->GetGame()->GameTime;
+	ieDword time = core->GetGame()->GetGameTime();
 	if (!Schedule(spawn->appearance, time)) {
 		return;
 	}
@@ -3446,7 +3469,7 @@ void Map::UpdateSpawns() const
 	if (SpawnsAlive()) {
 		return;
 	}
-	ieDword time = core->GetGame()->GameTime;
+	ieDword time = core->GetGame()->GetGameTime();
 	for (auto spawn : spawns) {
 		if ((spawn->Method & (SPF_NOSPAWN | SPF_WAIT)) != (SPF_NOSPAWN | SPF_WAIT)) continue;
 
@@ -3795,6 +3818,12 @@ int Map::GetCursor(const Point& p) const
 	}
 	switch (GetBlocked(p) & (PathMapFlags::PASSABLE | PathMapFlags::TRAVEL)) {
 		case PathMapFlags::IMPASSABLE:
+			if (core->IsTurnBased() && core->GetGame()->selected.size() == 1) {
+				auto actors = GetAllActorsInRadius(p, GA_NO_DEAD | GA_NO_UNSCHEDULED, 3, core->GetGame()->selected[0]);
+				if (actors.size() == 1 && actors[0] == core->GetGame()->selected[0]) {
+					return IE_CURSOR_WALK;
+				}
+			}
 			return IE_CURSOR_BLOCKED;
 		case PathMapFlags::PASSABLE:
 			return IE_CURSOR_WALK;
@@ -3866,14 +3895,14 @@ void Map::Sparkle(ieDword duration, ieDword color, ieDword type, const Point& po
 			grow = SP_SPAWN_SOME;
 			size = 40;
 			width = 40;
-			ttl = core->GetGame()->GameTime + Zpos;
+			ttl = core->GetGame()->GetGameTimeReal() + Zpos;
 			break;
 		case SPARKLE_EXPLOSION: //this isn't in the original engine, but it is a nice effect to have
 			path = SP_PATH_EXPL;
 			grow = SP_SPAWN_SOME;
 			size = 10;
 			width = 40;
-			ttl = core->GetGame()->GameTime + Zpos;
+			ttl = core->GetGame()->GetGameTimeReal() + Zpos;
 			break;
 		default:
 			break;

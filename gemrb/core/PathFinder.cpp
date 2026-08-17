@@ -39,6 +39,7 @@
 #include "BucketPriorityQueue.h"
 #include "Debug.h"
 #include "GameData.h"
+#include "Interface.h"
 #include "Map.h"
 #include "RNG.h"
 
@@ -299,8 +300,9 @@ Path Map::FindPath(const Point& s, const Point& d, const unsigned int size, unsi
 	unsigned int squaredMinDist = minDistance * minDistance;
 
 	// Weighted heuristic. Finds sub-optimal paths but should be quite a bit faster
-	constexpr float_t HEURISTIC_WEIGHT = 1.5;
-	const auto getHeuristic = [&](const SearchmapPoint& smptChild, const int& smptChildIdx) {
+	// In TBC mode with PF_PRECISE, use weight 1.0 for optimal paths
+	const float_t HEURISTIC_WEIGHT = (flags & PF_PRECISE) ? 1.0f : 1.5f;
+	auto getHeuristic = [&](const SearchmapPoint& smptChild, const int& smptChildIdx) {
 		// Calculate heuristic
 		const int xDist = smptChild.x - smptDest.x;
 		const int yDist = smptChild.y - smptDest.y;
@@ -351,7 +353,9 @@ Path Map::FindPath(const Point& s, const Point& d, const unsigned int size, unsi
 			if (isClosed[smptChildIdx]) continue;
 
 			const PathMapFlags childBlockStatus = (this->*getChildBlockedStatusFn)(smptChild, size);
-			bool childBlocked = !(childBlockStatus & (PathMapFlags::PASSABLE | PathMapFlags::ACTOR));
+			// In TBC mode actors don't block the coarse path (they get bumped); in real-time keep 0.9.5 behaviour
+			const PathMapFlags blockMask = core->IsTurnBased() ? PathMapFlags::PASSABLE : (PathMapFlags::PASSABLE | PathMapFlags::ACTOR);
+			bool childBlocked = !(childBlockStatus & blockMask);
 			if (childBlocked) continue;
 
 			// If there's an actor, check it can be bumped away

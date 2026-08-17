@@ -267,6 +267,7 @@ public:
 private:
 	ResRef smokebam;
 	tick_t timeStartStep = 0;
+	uint32_t timeTurnBasedExtencionDelay = 0;
 	//attributes from moveable object
 	orient_t Orientation = S;
 	orient_t NewOrientation = S;

@@ -155,7 +155,7 @@ void GameScript::SetGlobalTimer(Scriptable* Sender, Action* parameters)
 {
 	ieDword mytime;
 
-	mytime = core->GetGame()->GameTime; //gametime (should increase it)
+	mytime = core->GetGame()->GetGameTime(); //gametime (should increase it)
 	SetVariable(Sender, parameters->string0Parameter,
 		    parameters->int0Parameter * core->Time.defaultTicksPerSec + mytime);
 }
@@ -174,7 +174,7 @@ void GameScript::SetGlobalTimerRandom(Scriptable* Sender, Action* parameters)
 		random = parameters->int0Parameter - parameters->int1Parameter + 1;
 		random = RandomNumValue % random + parameters->int1Parameter;
 	}
-	mytime = core->GetGame()->GameTime; //gametime (should increase it)
+	mytime = core->GetGame()->GetGameTime(); //gametime (should increase it)
 	SetVariable(Sender, parameters->string0Parameter, random * core->Time.defaultTicksPerSec + mytime);
 }
 
@@ -184,7 +184,7 @@ void GameScript::SetGlobalTimerOnce(Scriptable* Sender, Action* parameters)
 	if (mytime != 0) {
 		return;
 	}
-	mytime = core->GetGame()->GameTime; //gametime (should increase it)
+	mytime = core->GetGame()->GetGameTime(); //gametime (should increase it)
 	SetVariable(Sender, parameters->string0Parameter,
 		    parameters->int0Parameter * core->Time.defaultTicksPerSec + mytime);
 }
@@ -1078,7 +1078,7 @@ void GameScript::WaitRandom(Scriptable* Sender, Action* parameters)
 		}
 		Sender->CurrentActionState = width * core->Time.defaultTicksPerSec;
 	} else {
-		Sender->CurrentActionState--;
+		Sender->DecreaseActionState();
 	}
 
 	if (!Sender->CurrentActionState) {
@@ -1094,7 +1094,7 @@ void GameScript::Wait(Scriptable* Sender, Action* parameters)
 	if (!Sender->CurrentActionState) {
 		Sender->CurrentActionState = parameters->int0Parameter * core->Time.defaultTicksPerSec;
 	} else {
-		Sender->CurrentActionState--;
+		Sender->DecreaseActionState();
 	}
 
 	if (!Sender->CurrentActionState) {
@@ -1110,7 +1110,7 @@ void GameScript::SmallWait(Scriptable* Sender, Action* parameters)
 	if (!Sender->CurrentActionState) {
 		Sender->CurrentActionState = parameters->int0Parameter;
 	} else {
-		Sender->CurrentActionState--;
+		Sender->DecreaseActionState();
 	}
 
 	if (!Sender->CurrentActionState) {
@@ -1129,7 +1129,7 @@ void GameScript::SmallWaitRandom(Scriptable* Sender, Action* parameters)
 		}
 		Sender->CurrentActionState = RAND(0, random - 1) + parameters->int0Parameter;
 	} else {
-		Sender->CurrentActionState--;
+		Sender->DecreaseActionState();
 	}
 
 	if (!Sender->CurrentActionState) {
@@ -1314,6 +1314,10 @@ void GameScript::MoveToPoint(Scriptable* Sender, Action* parameters)
 	Actor* actor = Scriptable::As<Actor>(Sender);
 	if (!actor) {
 		Sender->ReleaseCurrentAction();
+		return;
+	}
+
+	if (core->IsTurnBased() && actor->InInitiativeList() && core->tbcManager.currentTurnBasedActor != actor) {
 		return;
 	}
 
@@ -1765,7 +1769,7 @@ void GameScript::DisplayString(Scriptable* Sender, Action* parameters)
 //DisplayStringHead, but wait until done
 void GameScript::DisplayStringWait(Scriptable* Sender, Action* parameters)
 {
-	ieDword gt = core->GetGame()->GameTime;
+	ieDword gt = core->GetGame()->GetGameTimeReal();
 	if (Sender->CurrentActionState) {
 		if (gt >= (ieDword) parameters->int2Parameter) {
 			Sender->ReleaseCurrentAction();
@@ -2370,6 +2374,16 @@ void GameScript::Unlock(Scriptable* Sender, Action* parameters)
 	if (!tar) {
 		return;
 	}
+
+	Actor* actor = Scriptable::As<Actor>(Sender);
+	if (core->IsTurnBased() && actor && actor->InInitiativeList()) {
+		if (actor != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0 || !core->tbcManager.HasMainAction()) {
+			return;
+		}
+		core->tbcManager.UseMainAction();
+		actor->RemoveFromAdditionInitiativeLists();
+	}
+
 	switch (tar->Type) {
 		case ST_DOOR:
 			static_cast<Door*>(tar)->SetDoorLocked(false, true);
@@ -2442,6 +2456,15 @@ void GameScript::RemoveTraps(Scriptable* Sender, Action* parameters)
 		Sender->ReleaseCurrentAction();
 		return;
 	}
+
+	if (core->IsTurnBased() && actor->InInitiativeList()) {
+		if (actor != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0 || !core->tbcManager.HasMainAction()) {
+			return;
+		}
+		core->tbcManager.UseMainAction();
+		actor->RemoveFromAdditionInitiativeLists();
+	}
+
 	Scriptable* tar = GetScriptableFromObject(Sender, parameters);
 	if (!tar) {
 		Sender->ReleaseCurrentAction();
@@ -2519,6 +2542,15 @@ void GameScript::PickLock(Scriptable* Sender, Action* parameters)
 {
 	//only actors may try to pick a lock
 	Actor* actor = Scriptable::As<Actor>(Sender);
+
+	if (core->IsTurnBased() && actor && actor->InInitiativeList()) {
+		if (actor != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0 || !core->tbcManager.HasMainAction()) {
+			return;
+		}
+		core->tbcManager.UseMainAction();
+		actor->RemoveFromAdditionInitiativeLists();
+	}
+
 	if (!actor) {
 		Sender->ReleaseCurrentAction();
 		return;
@@ -2578,12 +2610,34 @@ void GameScript::OpenDoor(Scriptable* Sender, Action* parameters)
 	// no idea if this is right, or whether OpenDoor/CloseDoor should allow opening
 	// of all doors, or some doors, or whether it should still check for non-actors
 	Actor* actor = Scriptable::As<Actor>(Sender);
+
+	bool wasLocked = door->Flags & DOOR_LOCKED;
 	if (actor) {
 		actor->SetModal(Modal::None);
 		if (!door->TryUnlock(actor)) {
 			return;
 		}
 	}
+	// TBC: opening unlocked door = free action, locked door (picking) = main action
+	if (core->IsTurnBased() && actor && actor->InInitiativeList()) {
+		if (actor != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0) {
+			return;
+		}
+		if (wasLocked) {
+			// Door was locked - use main action
+			if (!core->tbcManager.HasMainAction()) {
+				return;
+			}
+			core->tbcManager.UseMainAction();
+			actor->RemoveFromAdditionInitiativeLists();
+		} else {
+			// Door was unlocked - use free action
+			if (!core->tbcManager.UseFreeAction()) {
+				return;
+			}
+		}
+	}
+
 	door->SetDoorOpen(true, false, gid, false);
 	Sender->ReleaseCurrentAction();
 }
@@ -2597,12 +2651,22 @@ void GameScript::CloseDoor(Scriptable* Sender, Action* parameters)
 	}
 	// see comments in OpenDoor above
 	Actor* actor = Scriptable::As<Actor>(Sender);
+
+	if (core->IsTurnBased() && actor && actor->InInitiativeList()) {
+		if (actor != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0 || !core->tbcManager.HasMainAction()) {
+			return;
+		}
+		core->tbcManager.UseMainAction();
+		actor->RemoveFromAdditionInitiativeLists();
+	}
+
 	if (actor) {
 		// clear modal state like in OpenDoor?
 		if (!door->TryUnlock(actor)) {
 			return;
 		}
 	}
+
 	door->SetDoorOpen(false, false, 0);
 	Sender->ReleaseCurrentAction();
 }
@@ -3318,7 +3382,8 @@ void GameScript::PlayDead(Scriptable* Sender, Action* parameters)
 		Sender->ReleaseCurrentAction();
 		return;
 	}
-	actor->CurrentActionState--;
+
+	actor->DecreaseActionState();
 }
 
 void GameScript::PlayDeadInterruptible(Scriptable* Sender, Action* parameters)
@@ -3339,7 +3404,7 @@ void GameScript::PlayDeadInterruptible(Scriptable* Sender, Action* parameters)
 		Sender->ReleaseCurrentAction();
 		return;
 	}
-	actor->CurrentActionState--;
+	actor->DecreaseActionState();
 }
 
 /* this is not correct, see #92 */
@@ -4684,6 +4749,15 @@ void GameScript::PickPockets(Scriptable* Sender, Action* parameters)
 		return;
 	}
 
+	Actor* actor = Scriptable::As<Actor>(Sender);
+	if (core->IsTurnBased() && actor && actor->InInitiativeList()) {
+		if (actor != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0 || !core->tbcManager.HasMainAction()) {
+			return;
+		}
+		core->tbcManager.UseMainAction();
+		actor->RemoveFromAdditionInitiativeLists();
+	}
+
 	// determine slot to steal from and potentially adjust difficulty
 	int slot = -1;
 	if ((RandomNumValue & 3) || scr->GetStat(IE_GOLD) <= 0) {
@@ -5194,6 +5268,12 @@ void GameScript::RemoveMapnote(Scriptable* Sender, Action* parameters)
 
 void GameScript::AttackOneRound(Scriptable* Sender, Action* parameters)
 {
+	Actor* actor = Scriptable::As<Actor>(Sender);
+
+	if (core->IsTurnBased() && actor->GetStat(IE_EA) == EA_PC) {
+		return;
+	}
+
 	if (Sender->Type != ST_ACTOR) {
 		Sender->ReleaseCurrentAction();
 		return;
@@ -5220,7 +5300,7 @@ void GameScript::AttackOneRound(Scriptable* Sender, Action* parameters)
 	if (Sender->CurrentActionState <= 1) {
 		Sender->ReleaseCurrentAction();
 	} else {
-		Sender->CurrentActionState--;
+		Sender->DecreaseActionState();
 	}
 }
 
@@ -5379,7 +5459,7 @@ void GameScript::AttackReevaluate(Scriptable* Sender, Action* parameters)
 		return;
 	}
 
-	Sender->CurrentActionState--;
+	Sender->DecreaseActionState();
 	if (Sender->CurrentActionState <= 0) {
 		Sender->ReleaseCurrentAction();
 	}
@@ -5502,7 +5582,7 @@ void GameScript::AdvanceTime(Scriptable* /*Sender*/, Action* parameters)
 // never advance a full day or more (in fact, duplicating this action does nothing)
 void GameScript::DayNight(Scriptable* /*Sender*/, Action* parameters)
 {
-	int delta = parameters->int0Parameter * core->Time.hour_size - core->GetGame()->GameTime % core->Time.day_size;
+	int delta = parameters->int0Parameter * core->Time.hour_size - core->GetGame()->GetGameTime() % core->Time.day_size;
 	if (delta < 0) {
 		delta += core->Time.day_size;
 	}
@@ -5720,6 +5800,9 @@ void GameScript::RandomWalk(Scriptable* Sender, Action* /*parameters*/)
 		Sender->ReleaseCurrentAction();
 		return;
 	}
+	if (core->IsTurnBased() && actor->InInitiativeList() && core->tbcManager.currentTurnBasedActor != actor) {
+		return;
+	}
 	actor->RandomWalk(true, false);
 }
 
@@ -5728,6 +5811,9 @@ void GameScript::RandomRun(Scriptable* Sender, Action* /*parameters*/)
 	Actor* actor = Scriptable::As<Actor>(Sender);
 	if (!actor) {
 		Sender->ReleaseCurrentAction();
+		return;
+	}
+	if (core->IsTurnBased() && actor->InInitiativeList() && core->tbcManager.currentTurnBasedActor != actor) {
 		return;
 	}
 	actor->RandomWalk(true, true);
@@ -5993,6 +6079,10 @@ void GameScript::PlayBardSong(Scriptable* Sender, Action* parameters)
 		return;
 	}
 
+	// TBC: activating modal aura costs main action
+	if (core->IsTurnBased() && !core->tbcManager.UseMainAction()) {
+		return;
+	}
 	actor->SetModalSpell(Modal::BattleSong, songs[songIdx]);
 	actor->SetModal(Modal::BattleSong);
 }
@@ -6001,6 +6091,10 @@ void GameScript::BattleSong(Scriptable* Sender, Action* /*parameters*/)
 {
 	Actor* actor = Scriptable::As<Actor>(Sender);
 	if (!actor) {
+		return;
+	}
+	// TBC: activating modal aura costs main action
+	if (core->IsTurnBased() && !core->tbcManager.UseMainAction()) {
 		return;
 	}
 	actor->SetModal(Modal::BattleSong);
@@ -6012,6 +6106,10 @@ void GameScript::FindTraps(Scriptable* Sender, Action* /*parameters*/)
 	if (!actor) {
 		return;
 	}
+	// TBC: activating modal aura costs main action
+	if (core->IsTurnBased() && !core->tbcManager.UseMainAction()) {
+		return;
+	}
 	actor->SetModal(Modal::DetectTraps);
 }
 
@@ -6020,6 +6118,19 @@ void GameScript::Hide(Scriptable* Sender, Action* /*parameters*/)
 	Actor* actor = Scriptable::As<Actor>(Sender);
 	if (!actor) {
 		return;
+	}
+
+	// TBC: spend action before attempting hide
+	if (core->IsTurnBased() && actor->InInitiativeList()) {
+		if (actor->GetThiefLevel() > 0) {
+			if (!core->tbcManager.UseFreeAction()) {
+				return;
+			}
+		} else {
+			if (!core->tbcManager.UseMainAction()) {
+				return;
+			}
+		}
 	}
 
 	if (actor->TryToHide()) {
@@ -6037,6 +6148,10 @@ void GameScript::Unhide(Scriptable* Sender, Action* /*parameters*/)
 	}
 
 	if (actor->Modal.State == Modal::Stealth) {
+		// TBC: deactivating modal aura costs free action
+		if (core->IsTurnBased() && !core->tbcManager.UseFreeAction()) {
+			return;
+		}
 		actor->SetModal(Modal::None);
 	}
 	actor->fxqueue.RemoveAllEffects(fx_set_invisible_state_ref);
@@ -6056,6 +6171,10 @@ void GameScript::Turn(Scriptable* Sender, Action* /*parameters*/)
 	int skill = actor->GetStat(IE_TURNUNDEADLEVEL);
 	if (skill < 1) return;
 
+	// TBC: activating modal aura costs main action
+	if (core->IsTurnBased() && !core->tbcManager.UseMainAction()) {
+		return;
+	}
 	actor->SetModal(Modal::TurnUndead);
 }
 
@@ -6882,6 +7001,8 @@ void GameScript::UseItem(Scriptable* Sender, Action* parameters)
 			return;
 		}
 	}
+	int itemSpeed = hh->Speed;
+	ieWord itemType = itm->ItemType;
 	gamedata->FreeItem(itm, itemres, false);
 
 	float_t angle = AngleFromPoints(Sender->Pos, tar->Pos);
@@ -6894,6 +7015,32 @@ void GameScript::UseItem(Scriptable* Sender, Action* parameters)
 	// only one use per round; skip for our internal attack projectile
 	if (!(flags & UI_NOAURA) && act->AuraPolluted()) {
 		return;
+	}
+
+	if (core->IsTurnBased() && act->InInitiativeList()) {
+		if (act != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0) {
+			return;
+		}
+		// Check if item is from quick slot
+		bool isQuickSlot = false;
+		if (act->PCStats) {
+			for (int i = 0; i < MAX_QUICKITEMSLOT; i++) {
+				if (act->PCStats->QuickItemSlots[i] == Slot) {
+					isQuickSlot = true;
+					break;
+				}
+			}
+		}
+		// Scrolls use main action (like casting a spell), other quick items use free action
+		if (isQuickSlot && itemType != 11) { // 11 = IT_SCROLL
+			if (!core->tbcManager.UseFreeAction()) {
+				return;
+			}
+		} else {
+			if (!core->tbcManager.UseMainAction()) {
+				return;
+			}
+		}
 	}
 
 	Sender->ReleaseCurrentAction();
@@ -6944,6 +7091,37 @@ void GameScript::UseItemPoint(Scriptable* Sender, Action* parameters)
 	// only one use per round; skip for our internal attack projectile
 	if (!(flags & UI_NOAURA) && act->AuraPolluted()) {
 		return;
+	}
+
+	if (core->IsTurnBased() && act->InInitiativeList()) {
+		if (act != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0) {
+			return;
+		}
+		// Get item type for scroll check
+		const Item* itm = gamedata->GetItem(itemres, true);
+		ieWord itemType = itm ? itm->ItemType : 0;
+		if (itm) gamedata->FreeItem(itm, itemres, false);
+
+		// Check if item is from quick slot
+		bool isQuickSlot = false;
+		if (act->PCStats) {
+			for (int i = 0; i < MAX_QUICKITEMSLOT; i++) {
+				if (act->PCStats->QuickItemSlots[i] == Slot) {
+					isQuickSlot = true;
+					break;
+				}
+			}
+		}
+		// Scrolls use main action (like casting a spell), other quick items use free action
+		if (isQuickSlot && itemType != 11) { // 11 = IT_SCROLL
+			if (!core->tbcManager.UseFreeAction()) {
+				return;
+			}
+		} else {
+			if (!core->tbcManager.UseMainAction()) {
+				return;
+			}
+		}
 	}
 
 	Point targetPos = parameters->pointParameter;

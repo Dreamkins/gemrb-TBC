@@ -146,7 +146,8 @@ static_assert(std::is_nothrow_move_constructible<Path>::value, "Path should be n
 enum {
 	PF_SIGHT = 1,
 	PF_BACKAWAY = 2,
-	PF_ACTORS_ARE_BLOCKING = 4
+	PF_ACTORS_ARE_BLOCKING = 4,
+	PF_PRECISE = 8 // TBC: use optimal pathfinding (no heuristic weight)
 };
 }
 

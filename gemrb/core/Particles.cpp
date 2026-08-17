@@ -283,7 +283,7 @@ int Particles::Update()
 	lastUpdate = time;
 
 	if (timetolive) {
-		if (timetolive < core->GetGame()->GameTime) {
+		if (timetolive < core->GetGame()->GetGameTimeReal()) {
 			spawn_type = SP_SPAWN_NONE;
 			phase = P_FADE;
 		}

@@ -88,6 +88,24 @@ Scriptable::~Scriptable(void)
 	}
 }
 
+int Scriptable::DecreaseActionState()
+{
+	Actor* act = Scriptable::As<Actor>(this);
+	if (Type != ST_ACTOR || !(core->IsTurnBased() && act->InInitiativeList())) {
+		CurrentActionState--;
+	} else {
+		auto* slot = core->GetTurnBasedSlot(act);
+		if (slot && slot->CurrentActionStateDescrease) {
+			CurrentActionState -= slot->CurrentActionStateDescrease;
+			if (CurrentActionState < 0) {
+				CurrentActionState = 0;
+			}
+			slot->CurrentActionStateDescrease = 0;
+		}
+	}
+	return CurrentActionState;
+}
+
 ieDword Scriptable::GetLocal(const ieVariable& key, ieDword fallback) const
 {
 	auto lookup = locals.find(key);
@@ -177,9 +195,16 @@ bool Scriptable::IsPC() const
 
 void Scriptable::Update()
 {
+	if (Type == ST_PROXIMITY && core->IsTurnBased() && core->tbcManager.timeTurnBasedNeed < core->tbcManager.timeTurnBased) {
+		return;
+	}
+
 	Ticks++;
 	AdjustedTicks++;
-	if (AuraCooldown) AuraCooldown--;
+
+	if (AuraCooldown && !(Type == ST_ACTOR && ((Actor*) this)->InInitiativeList())) {
+		AuraCooldown--;
+	}
 
 	if (UnselectableTimer) {
 		UnselectableTimer--;
@@ -243,7 +268,9 @@ void Scriptable::TickScripting()
 	}
 
 	if (!needsUpdate) {
-		IdleTicks++;
+		if (!(Type == ST_ACTOR && ((Actor*) this)->InInitiativeList())) {
+			IdleTicks++;
+		}
 		return;
 	}
 
@@ -504,10 +531,12 @@ void Scriptable::ProcessActions()
 	while (true) {
 		CurrentActionInterruptible = true;
 		if (!CurrentAction) {
-			if (!(CurrentActionTicks == 0 && CurrentActionState == 0)) {
-				Log(ERROR, "Scriptable", "Last action: {}", lastAction);
+			if (!core->IsTurnBased()) {
+				if (!(CurrentActionTicks == 0 && CurrentActionState == 0)) {
+					Log(ERROR, "Scriptable", "Last action: {}", lastAction);
+				}
+				assert(CurrentActionTicks == 0 && CurrentActionState == 0);
 			}
-			assert(CurrentActionTicks == 0 && CurrentActionState == 0);
 			CurrentAction = PopNextAction();
 		} else {
 			CurrentActionTicks++;
@@ -1256,11 +1285,12 @@ int Scriptable::CastSpellPoint(const Point& target, bool deplete, bool instant, 
 	objects.LastSpellTarget = 0;
 	objects.LastTargetPos.Invalidate();
 	Actor* actor = Scriptable::As<Actor>(this);
+
 	if (actor && actor->HandleCastingStance(SpellResRef, deplete, instant)) {
 		Log(ERROR, "Scriptable", "Spell {} not known or memorized, aborting cast!", SpellResRef);
 		return -1;
 	}
-	if (!instant && !noInterrupt) {
+	if (!instant && !noInterrupt && !core->IsTurnBased()) {
 		AuraCooldown = core->Time.attack_round_size;
 	}
 	if (!noInterrupt && !CanCast(SpellResRef)) {
@@ -1293,6 +1323,7 @@ int Scriptable::CastSpell(Scriptable* target, bool deplete, bool instant, bool n
 	objects.LastSpellTarget = 0;
 	objects.LastTargetPos.Invalidate();
 	Actor* actor = Scriptable::As<Actor>(this);
+
 	if (actor && actor->HandleCastingStance(SpellResRef, deplete, instant)) {
 		Log(ERROR, "Scriptable", "Spell {} not known or memorized, aborting cast!", SpellResRef);
 		return -1;
@@ -1300,7 +1331,7 @@ int Scriptable::CastSpell(Scriptable* target, bool deplete, bool instant, bool n
 
 	assert(target);
 
-	if (!instant && !noInterrupt) {
+	if (!instant && !noInterrupt && !core->IsTurnBased()) {
 		AuraCooldown = core->Time.attack_round_size;
 	}
 	if (!noInterrupt && !CanCast(SpellResRef)) {
@@ -1646,7 +1677,7 @@ bool Scriptable::TimerActive(ieDword ID)
 	if (tit == scriptTimers.end()) {
 		return false;
 	}
-	return tit->second > core->GetGame()->GameTime;
+	return tit->second > core->GetGame()->GetGameTime();
 }
 
 bool Scriptable::TimerExpired(ieDword ID)
@@ -1655,7 +1686,7 @@ bool Scriptable::TimerExpired(ieDword ID)
 	if (tit == scriptTimers.end()) {
 		return false;
 	}
-	if (tit->second <= core->GetGame()->GameTime) {
+	if (tit->second <= core->GetGame()->GetGameTime()) {
 		// expired timers become inactive after being checked
 		scriptTimers.erase(tit);
 		return true;
@@ -1665,7 +1696,7 @@ bool Scriptable::TimerExpired(ieDword ID)
 
 void Scriptable::StartTimer(ieDword ID, ieDword expiration)
 {
-	ieDword newTime = core->GetGame()->GameTime + expiration * core->Time.defaultTicksPerSec;
+	ieDword newTime = core->GetGame()->GetGameTime() + expiration * core->Time.defaultTicksPerSec;
 	const auto& tit = scriptTimers.find(ID);
 	if (tit != scriptTimers.end()) {
 		tit->second = newTime;

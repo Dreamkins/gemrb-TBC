@@ -605,7 +605,19 @@ Projectile::ProjectileState Projectile::GetNextTravelState()
 	// as the projectile won't go away on its own
 	if (ExtFlags & PEF_FREEZE && extensionDelay) {
 		if (extensionDelay > 0) {
-			extensionDelay--;
+			if (core->IsTurnBased()) {
+				if (timeTurnBasedExtencionDelay <= core->tbcManager.timeTurnBased) {
+					if (timeTurnBasedExtencionDelay) {
+						extensionDelay -= core->Time.round_sec * core->Time.defaultTicksPerSec;
+						if (extensionDelay < 0) {
+							extensionDelay = 0;
+						}
+					}
+					timeTurnBasedExtencionDelay = core->tbcManager.timeTurnBased + core->Time.round_sec * core->Time.defaultTicksPerSec;
+				}
+			} else {
+				extensionDelay--;
+			}
 			UpdateSound();
 		}
 
@@ -1059,7 +1071,7 @@ void Projectile::LineTarget(Path::const_iterator beg, Path::const_iterator end)
 
 	Actor* original = area->GetActorByGlobalID(Caster);
 	int targetFlags = CalculateTargetFlag();
-	uint32_t time = core->GetGame()->GameTime;
+	uint32_t time = core->GetGame()->GetGameTimeReal();
 	auto iter = beg;
 
 	do {
@@ -1635,13 +1647,15 @@ void Projectile::SpawnChild(size_t idx, bool firstExplosion, const Point& offset
 		pro->Speed -= RAND(0, 7);
 
 		int delay = Extension->Delay * extensionExplosionCount;
-		if (apFlags & APF_BOTH && delay) {
-			delay = RAND(0, delay - 1);
+		if (!core->IsTurnBased()) {
+			if (apFlags & APF_BOTH && delay) {
+				delay = RAND(0, delay - 1);
+			}
+			// this needs to be commented out for ToB horrid wilting
+			//if(ExtFlags&PEF_FREEZE) {
+			delay += Extension->Delay;
+			//}
 		}
-		// this needs to be commented out for ToB horrid wilting
-		//if(ExtFlags&PEF_FREEZE) {
-		delay += Extension->Delay;
-		//}
 		pro->SetDelay(delay);
 	}
 
@@ -1738,12 +1752,25 @@ Projectile::ProjectileState Projectile::GetNextExplosionState()
 
 	// delay explosion, it could even be revoked with PAF_DELAYED (see skull trap)
 	if (extensionDelay) {
-		extensionDelay--;
+		if (core->IsTurnBased()) {
+			if (timeTurnBasedExtencionDelay <= core->tbcManager.timeTurnBased) {
+				if (timeTurnBasedExtencionDelay) {
+					extensionDelay -= 5 * core->Time.defaultTicksPerSec;
+					if (extensionDelay < 0) {
+						extensionDelay = 0;
+					}
+				}
+				timeTurnBasedExtencionDelay = core->tbcManager.timeTurnBased + 6 * core->Time.defaultTicksPerSec;
+			}
+		} else {
+			extensionDelay--;
+		}
+
 		// proper scorchers hit at the start then have a delayed hit at the end
 		// but also anyone else that walks into them gets hit once or twice if unlucky
 		// this enables use in a fanning motion/AOE if the caster can move (bg2, not HoW)
 		// slightly throttle calls for efficiency
-		if (ExtFlags & PEF_LINE && core->GetGame()->GameTime % 5 == 0) {
+		if (ExtFlags & PEF_LINE && core->GetGame()->GetGameTimeReal() % 5 == 0) {
 			LineTarget();
 		}
 		return state;

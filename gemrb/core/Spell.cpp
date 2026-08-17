@@ -148,7 +148,7 @@ void Spell::AddCastingGlow(EffectQueue* fxqueue, ieDword duration, int gender) c
 	}
 
 	fx = EffectQueue::CreateEffect(fx_casting_glow_ref, 0, CastingGraphics, FX_DURATION_ABSOLUTE);
-	fx->Duration = core->GetGame()->GameTime + duration;
+	fx->Duration = core->GetGame()->GetGameTime() + duration;
 	fx->InventorySlot = 0xffff;
 	fx->Projectile = 0;
 	fxqueue->AddEffect(fx);

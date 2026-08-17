@@ -33,6 +33,7 @@
 #include "Interface.h"
 #include "Item.h"
 #include "Map.h"
+#include "PathFinder.h"
 #include "RNG.h"
 #include "ScriptedAnimation.h"
 #include "Spell.h"
@@ -1457,6 +1458,10 @@ void MoveToObjectCore(Scriptable* Sender, Action* parameters, ieDword flags, boo
 		return;
 	}
 
+	if (core->IsTurnBased() && actor->InInitiativeList() && core->tbcManager.currentTurnBasedActor != actor) {
+		return;
+	}
+
 	Point dest = target->Pos + parameters->pointParameter; // MoveToObjectOffset adds an offset
 	if (target->Type == ST_TRIGGER && static_cast<const InfoPoint*>(target)->GetUsePoint()) {
 		dest = static_cast<const InfoPoint*>(target)->UsePoint;
@@ -1531,7 +1536,24 @@ void AttackCore(Scriptable* Sender, Scriptable* target, int flags)
 	assert(attacker);
 	assert(target);
 
-	// if held or disabled, etc, then cannot start or continue attacking
+	if (core->IsTurnBased() && attacker->InInitiativeList() && core->tbcManager.currentTurnBasedActor != Sender) {
+		return;
+	}
+
+	// TBC: cannot attack while standing on an ally's cell
+	if (core->IsTurnBased() && attacker->InInitiativeList()) {
+		Map* area = attacker->GetCurrentArea();
+		Actor* actorAtPos = area->GetActor(attacker->Pos, GA_NO_DEAD | GA_NO_UNSCHEDULED | GA_NO_SELF, attacker);
+		if (actorAtPos && actorAtPos->BlocksSearchMap() && EARelation(attacker, actorAtPos) != EAR_HOSTILE) {
+			if (attacker->IsPC()) {
+				attacker->overHead.SetText(u"Can't act here!", true, false, Color(255, 100, 100, 255));
+			}
+			Sender->ReleaseCurrentAction();
+			return;
+		}
+	}
+
+	// if held or disabled, etc, then cannot start or continuing attacking
 	if (attacker->Immobile()) {
 		attacker->Timers.roundStart = 0;
 		Sender->ReleaseCurrentAction();
@@ -1545,7 +1567,14 @@ void AttackCore(Scriptable* Sender, Scriptable* target, int flags)
 		return;
 	}
 
-	const Actor* tar = Scriptable::As<Actor>(target);
+	if (core->IsTurnBased() && core->tbcManager.opportunity) {
+		Actor* optar = attacker->GetCurrentArea()->GetActorByGlobalID(core->tbcManager.opportunity);
+		if (optar) {
+			target = optar;
+		}
+	}
+
+	Actor* tar = Scriptable::As<Actor>(target);
 	if (attacker == tar) {
 		Sender->ReleaseCurrentAction();
 		Log(WARNING, "AttackCore", "Tried attacking itself: {}!", fmt::WideToChar { tar->GetName() });
@@ -1586,7 +1615,14 @@ void AttackCore(Scriptable* Sender, Scriptable* target, int flags)
 		weaponRange += 10;
 	}
 
-	if (!(flags & AC_NO_SOUND) && !Sender->CurrentActionTicks && !core->GetGameControl()->InDialog()) {
+	if (attacker && tar &&
+	    (((attacker->IsPC() || tar->IsPC()) && EARelation(attacker, tar) == EAR_HOSTILE) || // attack or attacked PC
+	     attacker->InInitiativeList() || tar->InInitiativeList())) { // for neutrals
+		attacker->MoveToInitiativeList();
+		tar->MoveToInitiativeList();
+	}
+
+	if (!core->IsTurnBased() && !(flags & AC_NO_SOUND) && !Sender->CurrentActionTicks && !core->GetGameControl()->InDialog()) {
 		// if the target changed scream and display attack message
 		if (target->GetGlobalID() != Sender->objects.LastTargetPersistent) {
 			displaymsg->DisplayConstantStringAction(HCStrings::ActionAttack, GUIColors::WHITE, Sender, target);
@@ -1616,7 +1652,7 @@ void AttackCore(Scriptable* Sender, Scriptable* target, int flags)
 
 	Sender->objects.LastTarget = target->GetGlobalID();
 	Sender->objects.LastTargetPersistent = Sender->objects.LastTarget;
-	attacker->PerformAttack(core->GetGame()->GameTime);
+	attacker->PerformAttack(core->GetGame()->GetGameTime());
 }
 
 void MoveNearerTo(Scriptable* Sender, const Scriptable* target, int distance, MNT flags)
@@ -1670,6 +1706,31 @@ MNT MoveNearerTo(Scriptable* Sender, const Point& p, int distance, MNT flags)
 		Log(ERROR, "GameScript", "MoveNearerTo only works with actors");
 		Sender->ReleaseCurrentAction();
 		return MNT::None;
+	}
+
+	// TBC: pre-validate path and movement points before attempting to move
+	if (core->IsTurnBased() && actor->InInitiativeList()) {
+		const InitiativeSlot* slot = core->GetTurnBasedSlot(actor);
+		if (slot && slot->movesleft <= 0) {
+			if (actor->IsPC()) {
+				actor->overHead.SetText(u"Can't reach!", true, false, Color(255, 100, 100, 255));
+			}
+			Sender->ReleaseCurrentAction();
+			return (static_cast<int>(flags) & 1) ? flags : MNT::None;
+		}
+		// Check if path exists
+		Map* area = actor->GetCurrentArea();
+		if (area) {
+			int pathFlags = PF_SIGHT | PF_ACTORS_ARE_BLOCKING | PF_PRECISE;
+			Path testPath = area->FindPath(actor->Pos, p, actor->circleSize, distance, pathFlags, actor);
+			if (testPath.Empty()) {
+				if (actor->IsPC()) {
+					actor->overHead.SetText(u"Can't reach!", true, false, Color(255, 100, 100, 255));
+				}
+				Sender->ReleaseCurrentAction();
+				return (static_cast<int>(flags) & 1) ? flags : MNT::None;
+			}
+		}
 	}
 
 	// chasing is not unbreakable
@@ -2219,6 +2280,10 @@ static bool InterruptSpellcasting(Scriptable* Sender)
 			displaymsg->DisplayConstantStringName(HCStrings::SpellFailed, GUIColors::WHITE, Sender);
 		}
 		DisplayStringCoreVC(Sender, Verbal::SpellDisrupted, DS_CONSOLE);
+		// Reset casting animation in turn-based mode
+		if (core->IsTurnBased()) {
+			caster->SetStance(IE_ANI_READY);
+		}
 		return true;
 	}
 
@@ -2256,6 +2321,10 @@ void SpellCore(Scriptable* Sender, Action* parameters, int flags)
 	ResRef spellResRef;
 	int level = 0;
 	static bool third = core->HasFeature(GFFlags::RULES_3ED);
+
+	if (core->IsTurnBased() && core->tbcManager.opportunity) {
+		return;
+	}
 
 	// handle iwd2 marked spell casting (MARKED_SPELL is 0)
 	// NOTE: supposedly only casting via SpellWait checks this, so refactor if needed
@@ -2317,6 +2386,15 @@ void SpellCore(Scriptable* Sender, Action* parameters, int flags)
 		}
 		return;
 	}
+
+	Actor* target = Scriptable::As<Actor>(tar);
+	if (act && tar &&
+	    (((act->IsPC() || target->IsPC()) && EARelation(act, target) == EAR_HOSTILE) || // attack or attacked PC
+	     act->InInitiativeList() || target->InInitiativeList())) { // for neutrals
+		act->MoveToInitiativeList();
+		target->MoveToInitiativeList();
+	}
+
 	dist = GetSpellDistance(spellResRef, Sender, tar->Pos);
 
 	if (act) {
@@ -2338,14 +2416,26 @@ void SpellCore(Scriptable* Sender, Action* parameters, int flags)
 		//move near to target
 		if ((flags & SC_RANGE_CHECK) && dist != 0x7fffffff) {
 			if (PersonalDistance(tar, Sender) > dist) {
-				MoveNearerTo(Sender, tar, dist, MNT::FinalDistance);
+				const InitiativeSlot* tslot = core->GetTurnBasedSlot(act);
+				if (core->IsTurnBased() && (core->tbcManager.currentTurnBasedActor != act || (tslot && tslot->movesleft <= 0))) {
+					Sender->ReleaseCurrentAction();
+					act->SetStance(IE_ANI_READY);
+				} else {
+					MoveNearerTo(Sender, tar, dist, MNT::FinalDistance);
+				}
 				gamedata->FreeSpell(spl, Sender->SpellResRef, false);
 				return;
 			}
 			if (!Sender->GetCurrentArea()->IsVisibleLOS(Sender->SMPos, tar->SMPos, act)) {
 				if (!(spl->Flags & SF_NO_LOS)) {
 					gamedata->FreeSpell(spl, Sender->SpellResRef, false);
-					MoveNearerTo(Sender, tar, dist, MNT::FinalDistance);
+					const InitiativeSlot* tslot = core->GetTurnBasedSlot(act);
+					if (core->IsTurnBased() && (core->tbcManager.currentTurnBasedActor != act || (tslot && tslot->movesleft <= 0))) {
+						Sender->ReleaseCurrentAction();
+						act->SetStance(IE_ANI_READY);
+					} else {
+						MoveNearerTo(Sender, tar, dist, MNT::FinalDistance);
+					}
 					return;
 				}
 			}
@@ -2371,6 +2461,18 @@ void SpellCore(Scriptable* Sender, Action* parameters, int flags)
 		return;
 	}
 
+	if (!Sender->CurrentActionState && core->IsTurnBased() && Sender->Type == ST_ACTOR && ((Actor*) Sender)->InInitiativeList()) {
+		if (Sender != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0) {
+			return;
+		}
+		if (!core->tbcManager.HasMainAction()) {
+			return;
+		}
+		core->tbcManager.UseAllMainActions();
+		((Actor*) Sender)->RemoveFromAdditionInitiativeLists();
+		parameters->int2Parameter = 1;
+	}
+
 	// mark as uninterruptible in the action sense, so further script
 	// updates don't remove the action before the casting is done
 	// the originals or at least iwd2 even marked it as IF_NOINT,
@@ -2380,7 +2482,7 @@ void SpellCore(Scriptable* Sender, Action* parameters, int flags)
 
 	int duration;
 	if (!parameters->int2Parameter) {
-		duration = Sender->CurrentActionState--;
+		duration = Sender->DecreaseActionState();
 	} else {
 		duration = Sender->CastSpell(tar, flags & SC_DEPLETE, flags & SC_INSTANT, flags & SC_NOINTERRUPT, level);
 	}
@@ -2427,6 +2529,10 @@ void SpellPointCore(Scriptable* Sender, Action* parameters, int flags)
 	ResRef spellResRef;
 	int level = 0;
 
+	if (core->IsTurnBased() && core->tbcManager.opportunity) {
+		return;
+	}
+
 	//resolve spellname
 	if (!ResolveSpellName(spellResRef, parameters)) {
 		Sender->ReleaseCurrentAction();
@@ -2465,14 +2571,28 @@ void SpellPointCore(Scriptable* Sender, Action* parameters, int flags)
 		if (flags & SC_RANGE_CHECK) {
 			unsigned int dist = GetSpellDistance(spellResRef, Sender, parameters->pointParameter);
 			if (PersonalDistance(parameters->pointParameter, Sender) > dist) {
-				MoveNearerTo(Sender, parameters->pointParameter, dist, MNT::FinalDistance);
+				// TBC: check if actor can move (is current actor and has movement left)
+				const InitiativeSlot* tslot = core->GetTurnBasedSlot(act);
+				if (core->IsTurnBased() && (core->tbcManager.currentTurnBasedActor != act || (tslot && tslot->movesleft <= 0))) {
+					Sender->ReleaseCurrentAction();
+					act->SetStance(IE_ANI_READY);
+				} else {
+					MoveNearerTo(Sender, parameters->pointParameter, dist, MNT::FinalDistance);
+				}
 				return;
 			}
 			if (!Sender->GetCurrentArea()->IsVisibleLOS(Sender->SMPos, SearchmapPoint(parameters->pointParameter), act)) {
 				const Spell* spl = gamedata->GetSpell(Sender->SpellResRef, true);
 				if (!(spl->Flags & SF_NO_LOS)) {
 					gamedata->FreeSpell(spl, Sender->SpellResRef, false);
-					MoveNearerTo(Sender, parameters->pointParameter, dist, MNT::FinalDistance);
+					// TBC: check if actor can move
+					const InitiativeSlot* tslot = core->GetTurnBasedSlot(act);
+					if (core->IsTurnBased() && (core->tbcManager.currentTurnBasedActor != act || (tslot && tslot->movesleft <= 0))) {
+						Sender->ReleaseCurrentAction();
+						act->SetStance(IE_ANI_READY);
+					} else {
+						MoveNearerTo(Sender, parameters->pointParameter, dist, MNT::FinalDistance);
+					}
 					return;
 				}
 				gamedata->FreeSpell(spl, Sender->SpellResRef, false);
@@ -2492,6 +2612,18 @@ void SpellPointCore(Scriptable* Sender, Action* parameters, int flags)
 		return;
 	}
 
+	if (!Sender->CurrentActionState && core->IsTurnBased() && Sender->Type == ST_ACTOR && ((Actor*) Sender)->InInitiativeList()) {
+		if (Sender != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0) {
+			return;
+		}
+		if (!core->tbcManager.HasMainAction()) {
+			return;
+		}
+		core->tbcManager.UseAllMainActions();
+		((Actor*) Sender)->RemoveFromAdditionInitiativeLists();
+		parameters->int2Parameter = 1;
+	}
+
 	// mark as uninterruptible in the action sense, so further script
 	// updates don't remove the action before the casting is done
 	// the originals or at least iwd2 even marked it as IF_NOINT,
@@ -2501,7 +2633,7 @@ void SpellPointCore(Scriptable* Sender, Action* parameters, int flags)
 
 	int duration;
 	if (!parameters->int2Parameter) {
-		duration = Sender->CurrentActionState--;
+		duration = Sender->DecreaseActionState();
 	} else {
 		duration = Sender->CastSpellPoint(parameters->pointParameter, flags & SC_DEPLETE, flags & SC_INSTANT, flags & SC_NOINTERRUPT, level);
 	}
@@ -2639,6 +2771,9 @@ void RunAwayFromCore(Scriptable* Sender, const Action* parameters, int flags)
 		Sender->ReleaseCurrentAction();
 		return;
 	}
+	if (core->IsTurnBased() && actor->InInitiativeList() && core->tbcManager.currentTurnBasedActor != actor) {
+		return;
+	}
 	// Avenger: I believe being dead still interrupts RunAwayFromNoInterrupt
 	if (Sender->GetInternalFlag() & IF_STOPATTACK) {
 		Sender->ReleaseCurrentAction();
@@ -2653,7 +2788,7 @@ void RunAwayFromCore(Scriptable* Sender, const Action* parameters, int flags)
 
 	// already fleeing or just about to end?
 	if (Sender->CurrentActionState > 0) {
-		Sender->CurrentActionState--;
+		Sender->DecreaseActionState();
 		return;
 	} else if (Sender->CurrentActionTicks > 0) {
 		if (flags & RunAwayFlags::NoInterrupt) {

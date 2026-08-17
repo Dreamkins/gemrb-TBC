@@ -1170,7 +1170,22 @@ bool GameControl::OnKeyRelease(const KeyboardEvent& key, unsigned short mod)
 	}
 
 	switch (key.keycode) {
-			//FIXME: move these to guiscript
+		//FIXME: move these to guiscript
+		case GEM_ESCAPE:
+			if (core->IsTurnBased() && core->tbcManager.currentTurnBasedActor->IsPC()) {
+				core->tbcManager.currentTurnBasedActor->ReleaseCurrentAction();
+			}
+			break;
+		case GEM_RETURN:
+			if (core->IsTurnBased()) {
+				core->ToggleTurnBased();
+			}
+			break;
+		case ' ': //soft pause
+			if (core->IsTurnBased()) {
+				core->TogglePause();
+			}
+			break;
 		case GEM_TAB: // remove overhead partymember hp/maxhp / names
 			DisplayHeadHPNames(false, viewport);
 			break;
@@ -1207,11 +1222,19 @@ String GameControl::TooltipText() const
 	}
 
 	const Point& gameMousePos = GameMousePos();
-	if (!area->IsVisible(gameMousePos)) {
-		return View::TooltipText();
+	const Actor* actor = nullptr;
+	if (core->IsTurnBased()) {
+		if (!area->IsVisible(gameMousePos) && !lastActorID) {
+			return View::TooltipText();
+		}
+		actor = area->GetActorByGlobalID(lastActorID);
+	} else {
+		if (!area->IsVisible(gameMousePos)) {
+			return View::TooltipText();
+		}
+		actor = area->GetActor(gameMousePos, GA_NO_DEAD | GA_NO_UNSCHEDULED);
 	}
 
-	const Actor* actor = area->GetActor(gameMousePos, GA_NO_DEAD | GA_NO_UNSCHEDULED);
 	if (!actor || actor->GetStat(IE_MC_FLAGS) & MC_NO_TOOLTIPS || (!actor->InParty && actor->IsInvisibleTo(nullptr))) {
 		return View::TooltipText();
 	}
@@ -1370,10 +1393,16 @@ void GameControl::UpdateCursor()
 	Point gameMousePos = GameMousePos();
 	int nextCursor = area->GetCursor(gameMousePos);
 	//make the invisible area really invisible
-	if (nextCursor == IE_CURSOR_INVALID) {
+	if (core->IsTurnBased()) {
+		if (nextCursor == IE_CURSOR_INVALID && !lastActorID) {
+			lastCursor = IE_CURSOR_BLOCKED;
+			return;
+		}
+	} else if (nextCursor == IE_CURSOR_INVALID) {
 		lastCursor = IE_CURSOR_BLOCKED;
 		return;
-	} else if (nextCursor == IE_CURSOR_BLOCKED) {
+	}
+	if (nextCursor == IE_CURSOR_BLOCKED) {
 		// don't leak that an enemy is invisible and treat its space as passable
 		// it's not necessarily lastActor, so we have to search again
 		const Actor* actor = area->GetActor(gameMousePos, GA_NO_DEAD | GA_NO_UNSCHEDULED | GA_NO_ALLY);
@@ -1402,15 +1431,29 @@ void GameControl::UpdateCursor()
 			overMe = nullptr;
 		}
 	} else {
-		InfoPoint* overInfoPoint = area->TMap->GetInfoPoint(gameMousePos, false);
-		overMe = overInfoPoint;
-		if (overInfoPoint) {
-			nextCursor = overInfoPoint->GetCursor(targetMode);
+		if (core->IsTurnBased()) {
+			overMe = overContainer = area->TMap->GetContainer(gameMousePos);
 		}
+
+		if (!overMe) {
+			InfoPoint* overInfoPoint = area->TMap->GetInfoPoint(gameMousePos, false);
+			overMe = overInfoPoint;
+			if (overInfoPoint) {
+				nextCursor = overInfoPoint->GetCursor(targetMode);
+			}
+		}
+
 		// recheck in case the position was different, resulting in a new isVisible check
-		if (nextCursor == IE_CURSOR_INVALID) {
-			lastCursor = IE_CURSOR_BLOCKED;
-			return;
+		if (core->IsTurnBased()) {
+			if (nextCursor == IE_CURSOR_INVALID && !lastActorID) {
+				lastCursor = IE_CURSOR_BLOCKED;
+				return;
+			}
+		} else {
+			if (nextCursor == IE_CURSOR_INVALID) {
+				lastCursor = IE_CURSOR_BLOCKED;
+				return;
+			}
 		}
 
 		// don't allow summons to try travelling (alone), since it causes tons of loading
@@ -1433,9 +1476,16 @@ void GameControl::UpdateCursor()
 	}
 	// recheck in case the position was different, resulting in a new isVisible check
 	// fixes bg2 long block door in ar0801 above vamp beds, crashing on mouseover (too big)
-	if (nextCursor == IE_CURSOR_INVALID) {
-		lastCursor = IE_CURSOR_BLOCKED;
-		return;
+	if (core->IsTurnBased()) {
+		if (nextCursor == IE_CURSOR_INVALID && !lastActorID) {
+			lastCursor = IE_CURSOR_BLOCKED;
+			return;
+		}
+	} else {
+		if (nextCursor == IE_CURSOR_INVALID) {
+			lastCursor = IE_CURSOR_BLOCKED;
+			return;
+		}
 	}
 
 	const Actor* lastActor = area->GetActorByGlobalID(lastActorID);
@@ -1789,8 +1839,8 @@ bool GameControl::MoveViewportTo(Point p, bool center, int speed)
 		} else if (p.y + viewport.h >= mapsize.h + mwinh + padding) {
 			p.y = mapsize.h - viewport.h + mwinh + padding;
 			canMove = false;
-		} else if (p.y < 0) {
-			p.y = 0;
+		} else if (core->IsTurnBased() ? (p.y < 0 - mwinh - padding) : (p.y < 0)) {
+			p.y = core->IsTurnBased() ? -mwinh - padding : 0;
 			canMove = false;
 		}
 
@@ -2310,7 +2360,21 @@ bool GameControl::OnMouseUp(const MouseEvent& me, unsigned short Mod)
 		}
 
 		if (targetMode == TargetMode::None && (isSelectionRect || lastActorID)) {
-			MakeSelection(Mod & GEM_MOD_SHIFT);
+			if (core->IsTurnBased() && GetLastActor()) {
+				ieDword type = GetLastActor()->GetStat(IE_EA);
+				if (type >= EA_EVILCUTOFF || type == EA_GOODBUTRED) {
+					PerformSelectedAction(GetLastActor()->Pos);
+				} else {
+					if (GetLastActor()->IsSelected()) {
+						MoveViewportTo(GetLastActor()->Pos, true);
+					} else {
+						core->GetGame()->SelectActor(NULL, false, SELECT_NORMAL);
+						core->GetGame()->SelectActor(GetLastActor(), true, SELECT_NORMAL);
+					}
+				}
+			} else {
+				MakeSelection(Mod & GEM_MOD_SHIFT);
+			}
 			ClearMouseState();
 			return true;
 		}
@@ -2337,7 +2401,11 @@ bool GameControl::OnMouseUp(const MouseEvent& me, unsigned short Mod)
 		}
 
 		if (targetMode != TargetMode::None || (overMe && overMe->Type != ST_ACTOR)) {
-			if (!alreadyActed) PerformSelectedAction(p);
+			if (core->IsTurnBased() && GetLastActor()) {
+				PerformSelectedAction(GetLastActor()->Pos);
+			} else {
+				if (!alreadyActed) PerformSelectedAction(p);
+			}
 			ClearMouseState();
 			return true;
 		}
@@ -2464,6 +2532,13 @@ void GameControl::CommandSelectedMovement(const Point& p, bool formation, bool a
 
 bool GameControl::OnMouseWheelScroll(const Point& delta)
 {
+	if (core->IsTurnBased()) {
+		// The TBC initiative panel consumes wheel scrolling itself
+		// (see TBCPanelControl::OnMouseWheelScroll); here we just make sure
+		// the wheel never triggers real-time zoom while in turn-based mode.
+		return true;
+	}
+
 	if (core->GetDictionary().Get("Zoom Lock", 0) == 1) return false;
 
 	auto lastScale = GetScalePercent();

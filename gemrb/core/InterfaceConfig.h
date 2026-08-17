@@ -105,6 +105,7 @@ struct CoreSettings {
 	bool Logging = true;
 	int LogColor = -1; // -1 is to automatically determine
 	bool CheatFlag = true; /** Cheats enabled? */
+	bool EnableTurnBased = false; /** Turn-based combat (TBC) module enabled? */
 	int MaxPartySize = 6;
 	int GUIEnhancements = 23;
 

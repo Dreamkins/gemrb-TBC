@@ -24,6 +24,7 @@
 #include "Actor.h"
 #include "Interface.h"
 #include "Map.h"
+#include "TurnBasedCombatManager.h"
 
 #include "GUI/GameControl.h"
 #include "GameScript/GSUtils.h"
@@ -205,6 +206,13 @@ void Movable::BumpBack()
 // the goal is close enough.
 void Movable::DoStep(unsigned int walkScale, ieDword time)
 {
+	// TBC: Only current actor can move
+	Actor* tbcActor = Scriptable::As<Actor>(this);
+	if (core->IsTurnBased() && tbcActor && tbcActor != core->tbcManager.currentTurnBasedActor) {
+		ClearPath(true);
+		return;
+	}
+
 	// Only bump back if not moving
 	// Actors can be bumped while moving if they are backing off
 	if (!path) {
@@ -260,24 +268,51 @@ void Movable::DoStep(unsigned int walkScale, ieDword time)
 
 	bool blocksSearch = BlocksSearchMap();
 	if (actorInTheWay && blocksSearch && actorInTheWay->BlocksSearchMap()) {
-		// Give up instead of bumping if you are close to the goal
-		// the cut-off should be max 1 foot, so attacking with close-ranged weapons is unlikely to stop approaching too soon
-		// attacking actions already take weapon range into account when
-		// triggering movement, so this here does not mean we go needlessly close
-		if (path.Size() == 1 && WithinPersonalRange(this, nmptStep, 1)) {
-			ClearPath(true);
-			NewOrientation = Orientation;
-			// Do not call ReleaseCurrentAction() since other actions
-			// than MoveToPoint can cause movement
-			Log(DEBUG, "PathFinderWIP", "Abandoning because I'm close to the goal");
-			pathAbandoned = true;
-			return;
-		}
-		if (actor && actor->ValidTarget(GA_CAN_BUMP) && actorInTheWay->ValidTarget(GA_ONLY_BUMPABLE)) {
-			actorInTheWay->BumpAway();
+		if (core->IsTurnBased() && actor && actor == core->tbcManager.currentTurnBasedActor) {
+			// TBC mode: no bumping, different collision handling
+			bool isEnemy = EARelation(actor, actorInTheWay) == EAR_HOSTILE;
+			if (isEnemy) {
+				// Enemy blocking - shouldn't happen with proper pathfinding, but stop if it does
+				// Backtrack along path to find free spot
+				if (path.currentStep > 0) {
+					// Go back to previous step
+					path.currentStep--;
+					ClearPath(true);
+				} else {
+					ClearPath(true);
+				}
+				NewOrientation = Orientation;
+				return;
+			} else {
+				// Ally in the way - check if enough movement to pass through
+				// Need enough to enter AND exit (2x penalty)
+				float passThruPenalty = 0.05f;
+				if (core->GetCurrentTurnBasedSlot()->movesleft < passThruPenalty * 2) {
+					// Not enough movement to pass through - stop before ally
+					ClearPath(true);
+					NewOrientation = Orientation;
+					return;
+				}
+				// Pass through with extra movement cost
+				core->GetCurrentTurnBasedSlot()->movesleft -= passThruPenalty;
+				// Continue movement - don't return
+			}
 		} else {
-			Backoff();
-			return;
+			// Real-time mode: original behavior
+			// Give up instead of bumping if you are close to the goal
+			if (path.Size() == 1 && WithinPersonalRange(this, nmptStep, 1)) {
+				ClearPath(true);
+				NewOrientation = Orientation;
+				Log(DEBUG, "PathFinderWIP", "Abandoning because I'm close to the goal");
+				pathAbandoned = true;
+				return;
+			}
+			if (actor && actor->ValidTarget(GA_CAN_BUMP) && actorInTheWay->ValidTarget(GA_ONLY_BUMPABLE)) {
+				actorInTheWay->BumpAway();
+			} else {
+				Backoff();
+				return;
+			}
 		}
 	}
 	// Stop if there's a door in the way
@@ -295,6 +330,84 @@ void Movable::DoStep(unsigned int walkScale, ieDword time)
 	if (InternalFlags & IF_RUNNING) {
 		SetStanceDirect(IE_ANI_RUN);
 	}
+
+	Point newPos(Pos.x + dx, Pos.y + dy);
+
+	// TBC: consume movement points
+	if (core->IsTurnBased() && actor && actor == core->tbcManager.currentTurnBasedActor) {
+		float dist = SquaredDistance(Pos, newPos);
+		int speed = actor->GetSpeed() ? gamedata->GetStepTime() / actor->GetSpeed() : 0;
+		if (speed > 0) {
+			core->GetCurrentTurnBasedSlot()->movesleft -= dist / (speed * core->Time.defaultTicksPerSec * core->Time.round_sec * 10);
+		}
+
+		if (core->GetCurrentTurnBasedSlot()->movesleft <= 0) {
+			ClearPath(true);
+			NewOrientation = Orientation;
+			return;
+		}
+
+		// TBC: check for opportunity attacks
+		if (core->tbcManager.lasOpportunityPos != Pos) {
+			core->tbcManager.opportunists.clear();
+			// check enemies for opportunity attack
+			for (size_t idx = 0; idx < core->tbcManager.initiatives[0].size(); idx++) {
+				if (core->tbcManager.initiatives[0][idx].actor == this) {
+					continue;
+				}
+				if (actor->IsPC() && core->tbcManager.initiatives[0][idx].actor->IsPC()) {
+					continue;
+				}
+				// enemy?
+				if (EARelation(actor, core->tbcManager.initiatives[0][idx].actor) != EAR_HOSTILE) {
+					continue;
+				}
+				Actor* enemy = core->tbcManager.initiatives[0][idx].actor;
+				// can attack?
+				if (enemy->GetStance() == IE_ANI_DIE ||
+				    enemy->GetStance() == IE_ANI_TWITCH ||
+				    enemy->GetStance() == IE_ANI_SLEEP ||
+				    enemy->GetStance() == IE_ANI_CAST) {
+					continue;
+				}
+				// can move?
+				if (enemy->Immobile() ||
+				    (enemy->Modified[IE_STATE_ID] & (STATE_CANTMOVE | STATE_PANIC)) ||
+				    (enemy->GetBase(IE_STATE_ID) & (STATE_CANTMOVE | STATE_PANIC))) {
+					continue;
+				}
+				// current area?
+				if (enemy->GetCurrentArea() != GetCurrentArea()) {
+					continue;
+				}
+				// can see?
+				if (actor->IsInvisibleTo(enemy) || !CanSee(enemy, this, true, 0)) {
+					continue;
+				}
+				const ITMExtHeader* header = enemy->GetWeapon(false);
+				// melee weapon only
+				if (header && (header->AttackType != ITEM_AT_MELEE)) {
+					continue;
+				}
+				InitiativeSlot* slot = core->tbcManager.GetTurnBasedSlotWithAttack(enemy);
+				// have attacks?
+				if (!slot) {
+					continue;
+				}
+				unsigned int weaponRange = enemy->GetWeaponRange(false);
+				if (slot->actor == enemy && WithinPersonalRange(enemy, Pos, weaponRange) && !WithinPersonalRange(enemy, newPos, weaponRange)) {
+					core->tbcManager.opportunists.push_back(enemy->GetGlobalID());
+					core->tbcManager.opportunity = actor->GetGlobalID();
+				}
+			}
+			if (core->tbcManager.opportunists.size()) {
+				core->tbcManager.lasOpportunityPos = Pos;
+				ClearPath(true);
+				return;
+			}
+		}
+	}
+
 	SetPos(NavmapPoint(Pos.x + dx, Pos.y + dy));
 	oldPos = Pos;
 	if (actor && blocksSearch) {
@@ -308,6 +421,13 @@ void Movable::DoStep(unsigned int walkScale, ieDword time)
 		path.nodes[path.currentStep].waypoint = false;
 		++path.currentStep;
 		if (path.currentStep >= path.Size()) {
+			// TBC: check if destination is occupied, backtrack if needed
+			if (core->IsTurnBased() && actor && actor == core->tbcManager.currentTurnBasedActor) {
+				Actor* actorAtDest = area->GetActor(Pos, GA_NO_DEAD | GA_NO_UNSCHEDULED | GA_NO_SELF, this);
+				if (actorAtDest && actorAtDest->BlocksSearchMap()) {
+					// Destination occupied - stop here
+				}
+			}
 			ClearPath(true);
 			NewOrientation = Orientation;
 			pathfindingDistance = circleSize;
@@ -364,8 +484,18 @@ void Movable::WalkTo(const Point& Des, int distance)
 	}
 
 	if (BlocksSearchMap()) area->ClearSearchMapFor(this);
-	Path newPath = area->FindPath(Pos, Des, circleSize, distance, PF_SIGHT | PF_ACTORS_ARE_BLOCKING, actor);
-	if (!newPath && actor && actor->ValidTarget(GA_CAN_BUMP)) {
+
+	int pathFlags = PF_SIGHT;
+	if (core->IsTurnBased()) {
+		// TBC: all actors are walls, precise pathfinding
+		pathFlags |= PF_ACTORS_ARE_BLOCKING | PF_PRECISE;
+	} else {
+		pathFlags |= PF_ACTORS_ARE_BLOCKING;
+	}
+	Path newPath = area->FindPath(Pos, Des, circleSize, distance, pathFlags, actor);
+
+	// Fallback only in real-time mode
+	if (!newPath && !core->IsTurnBased() && actor && actor->ValidTarget(GA_CAN_BUMP)) {
 		Log(DEBUG, "WalkTo", "{} re-pathing ignoring actors", fmt::WideToChar { actor->GetShortName() });
 		newPath = area->FindPath(Pos, Des, circleSize, distance, PF_SIGHT, actor);
 	}

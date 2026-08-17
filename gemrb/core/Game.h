@@ -377,6 +377,7 @@ public:
 	int DelMap(unsigned int index, int forced = 0);
 	int AddNPC(Actor* npc);
 	Actor* GetNPC(unsigned int Index) const;
+	const std::vector<Actor*>& GetPCs() { return PCs; }
 	void SwapPCs(unsigned int pc1, unsigned int pc2) const;
 	bool IsDay(int hour = -1) const;
 	/** checks if the actor should be replaced via npclevel.2da and then does it */
@@ -516,6 +517,9 @@ public:
 	bool CheckPartyBanter() const;
 	void CheckBored();
 	void CheckAreaComment();
+	uint32_t GetGameTime() const;
+	void SetGameTime(uint32_t value);
+	uint32_t GetGameTimeReal() const { return GameTime; }
 
 private:
 	ResRef* GetDream(Map* area);

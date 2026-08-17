@@ -488,7 +488,7 @@ int fx_tint_screen(Scriptable* /*Owner*/, Actor* /*target*/, Effect* fx)
 		Color initialTint;
 		if (fx->FirstApply) {
 			initialTint = core->GetWindowManager()->FadeColor; // current global lighting
-			fx->Parameter4 = fx->Duration - core->GetGame()->GameTime; // estimate amount of steps
+			fx->Parameter4 = fx->Duration - core->GetGame()->GetGameTimeReal(); // estimate amount of steps
 			fx->Parameter5 = initialTint.Packed();
 			fx->Parameter3 = fx->Parameter4;
 		} else {
@@ -558,7 +558,7 @@ int fx_tint_screen(Scriptable* /*Owner*/, Actor* /*target*/, Effect* fx)
 			// maintain color after fade-in
 			if (!fx->Parameter6) {
 				core->GetWindowManager()->FadeColor = fadeColor;
-				if (fx->Duration == core->GetGame()->GameTime) core->timer.SetFadeFromColor(fromTime, 2);
+				if (fx->Duration == core->GetGame()->GetGameTimeReal()) core->timer.SetFadeFromColor(fromTime, 2);
 			}
 
 			// bit (4) Temporary durations maintain first bound infringement, then fade back to starting global
@@ -599,7 +599,7 @@ int fx_tint_screen(Scriptable* /*Owner*/, Actor* /*target*/, Effect* fx)
 				return FX_NOT_APPLIED;
 			}
 			// about to expire
-			if (fx->Duration == core->GetGame()->GameTime) core->timer.SetFadeFromColor(core->Time.defaultTicksPerSec);
+			if (fx->Duration == core->GetGame()->GetGameTimeReal()) core->timer.SetFadeFromColor(core->Time.defaultTicksPerSec);
 			break;
 		case 200: // supposed to fade currently active area tint back to its starting global lighting, but just kills it
 			core->timer.SetFadeToColor(1);
@@ -753,7 +753,7 @@ static inline void ConvertTiming(Effect* fx, int Duration)
 	// GameTime will be added in by EffectQueue
 	fx->Duration = Duration ? Duration * core->Time.defaultTicksPerSec : 1;
 	if (fx->TimingMode == FX_DURATION_ABSOLUTE) {
-		fx->Duration += core->GetGame()->GameTime;
+		fx->Duration += core->GetGame()->GetGameTime();
 	}
 	fx->TimingMode = FX_DURATION_INSTANT_LIMITED;
 }
@@ -1199,7 +1199,7 @@ int fx_detect_evil(Scriptable* Owner, Actor* target, Effect* fx)
 	if (!type) type = 0x08031e0a;
 	int speed = (type & 0xff00) >> 8;
 	if (!speed) speed = 30;
-	if (!(core->GetGame()->GameTime % speed)) {
+	if (!(core->GetGame()->GetGameTime() % speed)) {
 		ieDword color = fx->Parameter1;
 		//default is magenta (rgba)
 		if (!color) color = 0xff00ff00;
@@ -1237,7 +1237,7 @@ int fx_jumble_curse(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 		target->GetHit();
 	}
 	fx->Parameter4 = fx->Parameter3;
-	fx->Parameter3 = game->GameTime;
+	fx->Parameter3 = game->GetGameTime();
 	STAT_SET(IE_DEADMAGIC, 1);
 	STAT_SET(IE_SPELLFAILUREMAGE, 100);
 	STAT_SET(IE_SPELLFAILUREPRIEST, 100);
@@ -1254,7 +1254,7 @@ int fx_speak_with_dead(Scriptable* /*Owner*/, Actor* target, Effect* fx)
 	if (!STATE_GET(STATE_DEAD)) {
 		return FX_NOT_APPLIED;
 	}
-	if (fx->FirstApply) fx->Parameter4 = fx->Duration - core->GetGame()->GameTime;
+	if (fx->FirstApply) fx->Parameter4 = fx->Duration - core->GetGame()->GetGameTime();
 
 	if (fx->Parameter4 == 1) {
 		SetVariable(target, "Speak_with_Dead", 0, "GLOBAL");

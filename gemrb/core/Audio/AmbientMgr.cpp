@@ -197,7 +197,7 @@ tick_t AmbientMgr::Tick(tick_t ticks)
 	const Game* game = core->GetGame();
 	ieDword timeslice = 0;
 	if (game) {
-		timeslice = SCHEDULE_MASK(game->GameTime);
+		timeslice = SCHEDULE_MASK(game->GetGameTimeReal());
 	}
 
 	std::lock_guard<std::recursive_mutex> l(mutex);

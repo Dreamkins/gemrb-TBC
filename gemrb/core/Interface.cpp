@@ -60,6 +60,7 @@
 #include "GUI/GUIScriptInterface.h"
 #include "GUI/GameControl.h"
 #include "GUI/Label.h"
+#include "GUI/TBCPanelControl.h"
 #include "GUI/TextArea.h"
 #include "GUI/WindowManager.h"
 #include "GameScript/GameScript.h"
@@ -720,6 +721,11 @@ GameControl* Interface::StartGameControl()
 	Region screen(0, 0, config.Width, config.Height);
 	gamectrl = new GameControl(screen);
 	gamectrl->AssignScriptingRef(0, "GC");
+
+	// turn-based combat initiative panel (HUD overlay); inert unless IsTurnBased()
+	Region tbcFrame(0, 0, config.Width, 130);
+	TBCPanelControl* tbcPanel = new TBCPanelControl(tbcFrame);
+	gamectrl->AddSubviewInFrontOfView(tbcPanel);
 
 	return gamectrl;
 }
@@ -1806,7 +1812,7 @@ Actor* Interface::SummonCreature(const ResRef& resource, const ResRef& animRes, 
 			// set up the summon disable effect
 			Effect* newfx = EffectQueue::CreateEffect(fx_summon_disable_ref, 0, 1, FX_DURATION_ABSOLUTE);
 			if (newfx) {
-				newfx->Duration = vvc->GetSequenceDuration(Time.defaultTicksPerSec) * 9 / 10 + core->GetGame()->GameTime;
+				newfx->Duration = vvc->GetSequenceDuration(Time.defaultTicksPerSec) * 9 / 10 + core->GetGame()->GetGameTimeReal();
 				ApplyEffect(newfx, ab, ab);
 			}
 		}
@@ -2524,7 +2530,9 @@ void Interface::LoadGame(Holder<SaveGame> sg, GAMVersion override)
 	// and the loading can fail for various reasons
 
 	// Yes, it uses goto. Other ways seemed too awkward for me.
-
+	if (IsTurnBased()) {
+		resetTurnBased();
+	}
 	gamedata->SaveAllStores();
 	strings->CloseAux();
 	tokens.clear(); //clearing the token dictionary
@@ -3433,6 +3441,7 @@ bool Interface::ResolveRandomItem(CREItem* itm) const
 
 		// Explode to ResRef, so that there is a null terminator for strtounsigned
 		auto parts = Explode<ResRef, ResRef>(pickedItem, '*', 1);
+
 		ieWord diceSides;
 		bool isGold = false;
 		bool stacked = false;
@@ -4029,6 +4038,17 @@ int Interface::GetWisdomBonus(int column, int value) const
 
 PauseState Interface::TogglePause() const
 {
+	if (core->IsTurnBased()) {
+		Actor* actor = core->tbcManager.currentTurnBasedActor;
+		if (actor) {
+			bool notPlayerControl = actor->Immobile() || (actor->GetStat(IE_EA) != EA_PC && actor->GetStat(IE_EA) != EA_FAMILIAR) || (actor->Modified[IE_STATE_ID] & (STATE_MINDLESS ^ STATE_BERSERK));
+			if (actor->lastInit && game->GetGameTimeReal() - actor->lastInit > 4 && !notPlayerControl && !actor->InMove() && !actor->InAttack()) {
+				core->EndTurn();
+			}
+			return PauseState::Off;
+		}
+	}
+
 	const GameControl* gc = GetGameControl();
 	if (!gc) return PauseState::Off;
 	PauseState pause = (PauseState) ((gc->GetDialogueFlags() & DF_FREEZE_SCRIPTS) == 0);
@@ -4039,6 +4059,10 @@ PauseState Interface::TogglePause() const
 bool Interface::SetPause(PauseState pause, int flags) const
 {
 	GameControl* gc = GetGameControl();
+
+	if (core->IsTurnBased()) {
+		return false;
+	}
 
 	//don't allow soft pause in cutscenes and dialog
 	if (!(flags & PF_FORCED) && InCutSceneMode()) gc = nullptr;
@@ -4229,6 +4253,57 @@ void Interface::SetNextScript(const path_t& script)
 	QuitFlag |= QF_CHANGESCRIPT;
 }
 
+void Interface::InitTurnBasedSlot()
+{
+	tbcManager.InitTurnBasedSlot();
+}
+
+void Interface::FirstRoundStart()
+{
+	tbcManager.FirstRoundStart();
+}
+
+InitiativeSlot* Interface::GetTurnBasedSlot(Actor* actor)
+{
+	return tbcManager.GetTurnBasedSlot(actor);
+}
+
+InitiativeSlot* Interface::GetTurnBasedSlotWithAttack(Actor* actor)
+{
+	return tbcManager.GetTurnBasedSlotWithAttack(actor);
+}
+
+void Interface::EndTurn()
+{
+	tbcManager.EndTurn();
+}
+
+void Interface::ToggleTurnBased()
+{
+	if (!config.EnableTurnBased) return;
+	tbcManager.ToggleTurnBased();
+}
+
+void Interface::UpdateTurnBased()
+{
+	tbcManager.UpdateTurnBased();
+}
+
+void Interface::resetTurnBased()
+{
+	tbcManager.resetTurnBased();
+}
+
+InitiativeSlot* Interface::GetCurrentTurnBasedSlot()
+{
+	return tbcManager.GetCurrentTurnBasedSlot();
+}
+
+const InitiativeSlot* Interface::GetCurrentTurnBasedSlot() const
+{
+	return tbcManager.GetCurrentTurnBasedSlot();
+}
+
 float Interface::GetAnimationFPS(const ResRef& anim) const
 {
 	AutoTable animFPS = gamedata->LoadTable("animfps", true);
@@ -4257,7 +4332,7 @@ void Interface::ApplyTooltipDelay() const
 					      tooltipDelay * 21;
 	} else {
 		delay = tooltipDelay >= 100 ? std::numeric_limits<int>::max() :
-					     tooltipDelay * 25;
+					      tooltipDelay * 25;
 	}
 
 	WindowManager::SetTooltipDelay(delay);

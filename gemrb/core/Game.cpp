@@ -1452,12 +1452,12 @@ void Game::AdvanceTime(ieDword add, bool fatigue)
 {
 	static EffectRef fx_set_regenerating_state_ref = { "State:Regenerating", -1 };
 
-	ieDword hours = GameTime / core->Time.hour_size;
+	ieDword hours = GetGameTime() / core->Time.hour_size;
 	GameTime += add;
 	// if rest until healed is in action, skip most of this function
 	bool healOnly = core->GetDictionary().Get("Heal Party on Rest", 0) == 99;
 
-	ieDword hours2 = GameTime / core->Time.hour_size;
+	ieDword hours2 = GetGameTime() / core->Time.hour_size;
 	Map* map = GetCurrentArea();
 	if (hours != hours2 && !healOnly) {
 		//asking for a new weather when the hour changes
@@ -1627,6 +1627,8 @@ void Game::UpdateScripts()
 	for (size_t idx = 0; idx < Maps.size(); idx++) {
 		Maps[idx]->UpdateScripts();
 	}
+
+	core->UpdateTurnBased();
 
 	bool combatEnded = false;
 	if (PartyAttack) {
@@ -2217,7 +2219,7 @@ const Color* Game::GetGlobalTint() const
 	bool pstDayNight = map->AreaType & AT_PST_DAYNIGHT && core->HasFeature(GFFlags::PST_STATE_FLAGS);
 	if ((map->AreaType & (AT_OUTDOOR | AT_DAYNIGHT | AT_EXTENDED_NIGHT)) == (AT_OUTDOOR | AT_DAYNIGHT) || pstDayNight) {
 		//get daytime colour
-		ieDword daynight = core->Time.GetHour(GameTime);
+		ieDword daynight = core->Time.GetHour(GetGameTime());
 		if (daynight < 2 || daynight > 22) {
 			return &NightTint;
 		}
@@ -2253,7 +2255,7 @@ void Game::ApplyGlobalTint(Color& tint, BlitFlags& flags) const
 
 bool Game::IsDay(int hour) const
 {
-	int daynight = hour == -1 ? core->Time.GetHour(GameTime) : (hour % 24);
+	int daynight = hour == -1 ? core->Time.GetHour(GetGameTime()) : (hour % 24);
 	// matches GameScript::TimeOfDay and splprot.2da by including dawn
 	if (daynight < 6 || daynight > 20) {
 		return false;
@@ -2614,6 +2616,16 @@ void Game::MoveFamiliars(const ResRef& targetArea, const Point& targetPoint, int
 			MoveBetweenAreasCore(npc, targetArea, targetPoint, orientation, true);
 		}
 	}
+}
+
+uint32_t Game::GetGameTime() const
+{
+	return core->IsTurnBased() ? core->tbcManager.timeTurnBased : (uint32_t) GameTime;
+}
+
+void Game::SetGameTime(uint32_t value)
+{
+	GameTime = value;
 }
 
 bool Game::IsTargeted(ieDword gid) const

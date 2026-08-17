@@ -41,6 +41,7 @@
 #include "StringMgr.h"
 #include "TableMgr.h"
 #include "Timer.h"
+#include "TurnBasedCombatManager.h"
 
 #include "Audio/AmbientMgr.h"
 #include "Audio/AudioBackend.h"
@@ -279,6 +280,8 @@ struct ItemDragOp : public Control::ControlDragOp {
 private:
 	static Control dragDummy;
 };
+
+// InitiativeSlot is now defined in TurnBasedCombatManager.h
 
 /**
  * @class Interface
@@ -603,6 +606,8 @@ public:
 	int WriteWorldMap(const path_t& folder);
 	/** saves the .are and .sto files to the destination folder */
 	int CompressSave(const path_t& folder, bool overrideRunning);
+	/* toggle turn based mode */
+	void ToggleTurnBased();
 	/** toggles the pause. returns either PAUSE_ON or PAUSE_OFF to reflect the script state after toggling. */
 	PauseState TogglePause() const;
 	/** returns true the passed pause setting was applied. false otherwise. */
@@ -706,6 +711,12 @@ public:
 	bool DitherSprites = true;
 	int FeedbackLevel = 0;
 
+	// TurnBasedCombatManager - contains all TBC state and logic
+	TurnBasedCombatManager tbcManager;
+
+	// UI-related variables (not part of TBC logic)
+	int currentMouseWheel = 0;
+	bool resetFrame = false;
 	/** The Main program loop */
 	void Main(void);
 	/** returns true if the game is paused */
@@ -746,6 +757,19 @@ public:
 	MusicLoop& GetMusicLoop();
 
 	Timer& SetTimer(const EventHandler&, tick_t interval, int repeats = -1);
+
+	bool IsTurnBased() { return config.EnableTurnBased && (tbcManager.currentTurnBasedActor != nullptr || tbcManager.timeTurnBased < tbcManager.timeTurnBasedNeed); }
+	int GetCurrentTurnBasedSlotNum() { return tbcManager.currentTurnBasedSlot; }
+	int GetCurrentTurnBasedListNum() { return tbcManager.currentTurnBasedList; }
+	InitiativeSlot* GetCurrentTurnBasedSlot();
+	const InitiativeSlot* GetCurrentTurnBasedSlot() const;
+	InitiativeSlot* GetTurnBasedSlot(Actor* actor);
+	InitiativeSlot* GetTurnBasedSlotWithAttack(Actor* actor);
+	void InitTurnBasedSlot();
+	void FirstRoundStart();
+	void EndTurn();
+	void UpdateTurnBased();
+	void resetTurnBased();
 	float GetAnimationFPS(const ResRef& anim) const;
 	void ApplyTooltipDelay() const;
 };
