@@ -361,10 +361,10 @@ bool TBCPanelControl::OnMouseDown(const MouseEvent& me, unsigned short /*mod*/)
 
 			if (slotRegion.PointInside(me.Pos())) {
 				// Dispatch actor click to Python handler (action/target logic).
-				FunctionParameters params;
-				params.push_back(Parameter((long) actor->GetGlobalID()));
-				params.push_back(Parameter(IsCurrentActorSlot(actor, list)));
-				params.push_back(Parameter(actor->InParty));
+				ScriptEngine::FunctionParameters params;
+				params.push_back(ScriptEngine::Parameter((long) actor->GetGlobalID()));
+				params.push_back(ScriptEngine::Parameter(IsCurrentActorSlot(actor, list)));
+				params.push_back(ScriptEngine::Parameter(actor->InParty));
 				core->GetGUIScriptEngine()->RunFunction("TBCPanel", "OnPanelClick", params);
 				return true; // consume the click so GameControl doesn't also act on the map
 			}
