@@ -3299,6 +3299,85 @@ static PyObject* GemRB_GameControlToggleAlwaysRun(PyObject* /*self*/, PyObject* 
 	Py_RETURN_NONE;
 }
 
+PyDoc_STRVAR(GemRB_SetTurnBasedTarget__doc,
+	     "===== SetTurnBasedTarget =====\n\
+\n\
+**Prototype:** GemRB.SetTurnBasedTarget (TargetGlobalID)\n\
+\n\
+**Description:** Sets the last turn-based combat target. Used by the \n\
+initiative panel click handler to mark an actor as the current target.\n\
+\n\
+**Parameters:**\n\
+  * TargetGlobalID - the global ID of the target actor\n\
+\n\
+**Return value:** N/A\n\
+");
+
+static PyObject* GemRB_SetTurnBasedTarget(PyObject* /*self*/, PyObject* args)
+{
+	int targetID = 0;
+	PARSE_ARGS(args, "i", &targetID);
+
+	core->tbcManager.lastTurnBasedTarget = targetID;
+
+	Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(GemRB_GetTurnBasedScrollOffset__doc,
+	     "===== GetTurnBasedScrollOffset =====\n\
+\n\
+**Prototype:** GemRB.GetTurnBasedScrollOffset ()\n\
+\n\
+**Description:** Returns the current horizontal scroll offset of the \n\
+turn-based combat initiative panel.\n\
+\n\
+**Return value:** Integer scroll offset value.\n\
+");
+
+static PyObject* GemRB_GetTurnBasedScrollOffset(PyObject* /*self*/, PyObject* /*args*/)
+{
+	return PyLong_FromLong(core->tbcManager.offsetPanelTurnBased);
+}
+
+PyDoc_STRVAR(GemRB_SetTurnBasedScrollOffset__doc,
+	     "===== SetTurnBasedScrollOffset =====\n\
+\n\
+**Prototype:** GemRB.SetTurnBasedScrollOffset (Offset)\n\
+\n\
+**Description:** Sets the horizontal scroll offset of the turn-based \n\
+combat initiative panel.\n\
+\n\
+**Parameters:**\n\
+  * Offset - new scroll offset value\n\
+\n\
+**Return value:** N/A\n\
+");
+
+static PyObject* GemRB_SetTurnBasedScrollOffset(PyObject* /*self*/, PyObject* args)
+{
+	int offset = 0;
+	PARSE_ARGS(args, "i", &offset);
+
+	core->tbcManager.offsetPanelTurnBased = offset;
+
+	Py_RETURN_NONE;
+}
+
+PyDoc_STRVAR(GemRB_GetMouseScrollSpeed__doc,
+	     "===== GetMouseScrollSpeed =====\n\
+\n\
+**Prototype:** GemRB.GetMouseScrollSpeed ()\n\
+\n\
+**Description:** Returns the current mouse scroll speed setting.\n\
+\n\
+**Return value:** Integer scroll speed value.\n\
+");
+
+static PyObject* GemRB_GetMouseScrollSpeed(PyObject* /*self*/, PyObject* /*args*/)
+{
+	return PyLong_FromLong(core->GetMouseScrollSpeed());
+}
+
 PyDoc_STRVAR(GemRB_Button_SetState__doc,
 	     "===== Button_SetState =====\n\
 \n\
@@ -13046,6 +13125,10 @@ static PyMethodDef GemRBMethods[] = {
 	METHOD(UseItem, METH_VARARGS),
 	METHOD(ValidTarget, METH_VARARGS),
 	METHOD(VerbalConstant, METH_VARARGS),
+	METHOD(SetTurnBasedTarget, METH_VARARGS),
+	METHOD(GetTurnBasedScrollOffset, METH_NOARGS),
+	METHOD(SetTurnBasedScrollOffset, METH_VARARGS),
+	METHOD(GetMouseScrollSpeed, METH_NOARGS),
 	// terminating entry
 	{ nullptr, nullptr, 0, nullptr }
 };

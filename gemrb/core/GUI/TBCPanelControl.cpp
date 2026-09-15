@@ -25,6 +25,7 @@
 #include "Game.h"
 #include "GameControl.h"
 #include "Interface.h"
+#include "ScriptEngine.h"
 #include "Sprite2D.h"
 #include "TurnBasedCombatManager.h"
 
@@ -359,11 +360,12 @@ bool TBCPanelControl::OnMouseDown(const MouseEvent& me, unsigned short /*mod*/)
 			Region slotRegion(Point(slotX, slotY), Size(PORTRAIT_WIDTH, SLOT_HEIGHT));
 
 			if (slotRegion.PointInside(me.Pos())) {
-				gc->SetLastActor(actor);
-				gc->UpdateCursor();
-				if (!actor->InParty && actor != core->tbcManager.currentTurnBasedActor) {
-					core->tbcManager.lastTurnBasedTarget = actor->GetGlobalID();
-				}
+				// Dispatch actor click to Python handler (action/target logic).
+				FunctionParameters params;
+				params.push_back(Parameter((long) actor->GetGlobalID()));
+				params.push_back(Parameter(IsCurrentActorSlot(actor, list)));
+				params.push_back(Parameter(actor->InParty));
+				core->GetGUIScriptEngine()->RunFunction("TBCPanel", "OnPanelClick", params);
 				return true; // consume the click so GameControl doesn't also act on the map
 			}
 		}
@@ -397,15 +399,8 @@ bool TBCPanelControl::OnMouseWheelScroll(const Point& delta)
 		return false;
 	}
 
-	int dir = 0;
-	if (delta.x > 0 || delta.y > 0) {
-		dir = 1;
-	} else if (delta.x < 0 || delta.y < 0) {
-		dir = -1;
-	}
-	if (dir != 0) {
-		core->tbcManager.offsetPanelTurnBased += dir * core->GetMouseScrollSpeed() * 4;
-	}
+	// Dispatch scroll to Python handler (offset adjustment).
+	core->GetGUIScriptEngine()->RunFunction("TBCPanel", "OnPanelMouseWheelScroll", delta);
 	return true;
 }
 

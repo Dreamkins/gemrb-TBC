@@ -758,7 +758,7 @@ public:
 
 	Timer& SetTimer(const EventHandler&, tick_t interval, int repeats = -1);
 
-	bool IsTurnBased() { return config.EnableTurnBased && (tbcManager.currentTurnBasedActor != nullptr || tbcManager.timeTurnBased < tbcManager.timeTurnBasedNeed); }
+	bool IsTurnBased() const { return config.EnableTurnBased && (tbcManager.currentTurnBasedActor != nullptr || tbcManager.timeTurnBased < tbcManager.timeTurnBasedNeed); }
 	int GetCurrentTurnBasedSlotNum() { return tbcManager.currentTurnBasedSlot; }
 	int GetCurrentTurnBasedListNum() { return tbcManager.currentTurnBasedList; }
 	InitiativeSlot* GetCurrentTurnBasedSlot();

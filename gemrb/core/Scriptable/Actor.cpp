@@ -6898,10 +6898,11 @@ void Actor::MoveToInitiativeList()
 		return;
 	}
 
+	InitiativeSlot* currentSlot = core->GetCurrentTurnBasedSlot();
 	InitiativeSlot slot;
 	slot.actor = this;
 
-	slot.initiative = CalculateInitiative(core->tbcManager.roundTurnBased > 0 ? core->GetCurrentTurnBasedSlot()->initiative + 1 : 1);
+	slot.initiative = CalculateInitiative(core->tbcManager.roundTurnBased > 0 && currentSlot ? currentSlot->initiative + 1 : 1);
 	slot.image = CopyPortrait(1);
 
 	core->tbcManager.initiatives[0].push_back(slot);
