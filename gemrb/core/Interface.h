@@ -759,6 +759,13 @@ public:
 	Timer& SetTimer(const EventHandler&, tick_t interval, int repeats = -1);
 
 	bool IsTurnBased() const { return config.EnableTurnBased && (tbcManager.currentTurnBasedActor != nullptr || tbcManager.timeTurnBased < tbcManager.timeTurnBasedNeed); }
+	// Whether the turn-based combat feature itself is engaged: the master config switch
+	// AND the runtime user toggle. Distinct from IsTurnBased(), which reports whether TBC
+	// *state* is currently live (which is false before the initiative lists are populated,
+	// and true during the environment phase when there is no current actor). Lifecycle
+	// decisions (populating the lists, purging stale slots on load, toggling the mode) must
+	// use this one; behaviour gating uses IsTurnBased().
+	bool IsTurnBasedEnabled() const { return config.EnableTurnBased && tbcManager.turnBasedEnable; }
 	int GetCurrentTurnBasedSlotNum() { return tbcManager.currentTurnBasedSlot; }
 	int GetCurrentTurnBasedListNum() { return tbcManager.currentTurnBasedList; }
 	InitiativeSlot* GetCurrentTurnBasedSlot();

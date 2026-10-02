@@ -120,9 +120,8 @@ namespace {
 		}
 	}
 
-	// Applies the cached scroll offset (read-only) and clamps it to keep the panel
-	// within the screen margins. Used for hit-testing where no wheel is consumed.
-	int ApplyScrollOffset(int screenWidth, int totalWidth, int xOffset)
+	// Pure: the scroll offset delta that keeps the panel within the screen margins.
+	int ClampedScrollOffset(int screenWidth, int totalWidth, int xOffset)
 	{
 		int screenMargin = screenWidth / SCREEN_MARGIN_DIVISOR;
 		int off = core->tbcManager.offsetPanelTurnBased;
@@ -131,7 +130,25 @@ namespace {
 		} else if (xOffset + off + totalWidth < screenWidth - screenMargin) {
 			off = (screenWidth - screenMargin) - totalWidth - xOffset;
 		}
-		return xOffset + off;
+		return off;
+	}
+
+	// Clamps the cached scroll offset AND persists it.
+	// The persist matters: TBCPanel.py does a read-modify-write on
+	// offsetPanelTurnBased, so if the clamp is only projected and never stored the
+	// accumulator grows without bound and every wheel tick lands back on the edge,
+	// which reads as a panel stuck in place.
+	int ClampScrollOffset(int screenWidth, int totalWidth, int xOffset)
+	{
+		core->tbcManager.offsetPanelTurnBased = ClampedScrollOffset(screenWidth, totalWidth, xOffset);
+		return core->tbcManager.offsetPanelTurnBased;
+	}
+
+	// Applies the cached scroll offset (read-only) and clamps it to keep the panel
+	// within the screen margins. Used for hit-testing where no wheel is consumed.
+	int ApplyScrollOffset(int screenWidth, int totalWidth, int xOffset)
+	{
+		return xOffset + ClampedScrollOffset(screenWidth, totalWidth, xOffset);
 	}
 
 	// True when the given actor occupies the slot at (list, idx) for the current turn.
@@ -165,7 +182,8 @@ namespace {
 		if (panelExceedsScreen && !panelBounds.PointInside(gc->ScreenMousePos())) {
 			core->tbcManager.offsetPanelTurnBased = 0;
 		}
-		return ApplyScrollOffset(screenWidth, totalWidth, xOffset);
+		ClampScrollOffset(screenWidth, totalWidth, xOffset);
+		return xOffset + core->tbcManager.offsetPanelTurnBased;
 	}
 }
 
@@ -287,7 +305,13 @@ void TBCPanelControl::DrawSelf(const Region& /*drawFrame*/, const Region& /*clip
 			VideoDriver->DrawRect(slotRegion, borderColor, false, BlitFlags::BLENDED);
 
 			if (isCurrentActor && actor->IsPC()) {
-				float movesLeft = std::min(1.0f, std::max(0.0f, core->GetCurrentTurnBasedSlot()->movesleft));
+				// currentTurnBasedActor is a cached pointer; the slot it names can still be
+				// gone after a dead-slot erase, so resolve it once and tolerate null.
+				const InitiativeSlot* curSlot = core->GetCurrentTurnBasedSlot();
+				if (!curSlot) {
+					continue;
+				}
+				float movesLeft = std::min(1.0f, std::max(0.0f, curSlot->movesleft));
 				int moveBarWidth = static_cast<int>(PORTRAIT_WIDTH * movesLeft);
 				Region moveRect(slotX, slotY - STATUS_INDICATOR_OFFSET, moveBarWidth, STATUS_INDICATOR_SIZE);
 				VideoDriver->DrawRect(moveRect, COLOR_MOVEMENT, true, BlitFlags::BLENDED);
@@ -300,7 +324,7 @@ void TBCPanelControl::DrawSelf(const Region& /*drawFrame*/, const Region& /*clip
 				Region actionRect(squaresStartX - 1, squaresY, STATUS_INDICATOR_SIZE, STATUS_INDICATOR_SIZE);
 				VideoDriver->DrawRect(actionRect, COLOR_ACTION_AVAILABLE, hasAction, BlitFlags::BLENDED);
 
-				bool hasFreeAction = core->GetCurrentTurnBasedSlot()->havefreeaction;
+				bool hasFreeAction = curSlot->havefreeaction;
 				Region freeActionRect(squaresStartX + STATUS_INDICATOR_SIZE + 2, squaresY,
 						      STATUS_INDICATOR_SIZE, STATUS_INDICATOR_SIZE);
 				VideoDriver->DrawRect(freeActionRect, COLOR_FREE_ACTION, hasFreeAction, BlitFlags::BLENDED);
@@ -314,11 +338,15 @@ void TBCPanelControl::DrawSelf(const Region& /*drawFrame*/, const Region& /*clip
 				float damagePercent = 1.0f - hpPercent;
 
 				int damageHeight = static_cast<int>((SLOT_HEIGHT - 2) * damagePercent);
-				Region damageOverlay(slotRegion.x + 1,
-						     slotRegion.y + 1 + static_cast<int>((SLOT_HEIGHT - 2) * hpPercent),
-						     slotRegion.w - 2,
-						     damageHeight);
-				VideoDriver->DrawRect(damageOverlay, COLOR_HP_DAMAGE, true, BlitFlags::BLENDED);
+				// At full health the overlay has zero height; a zero-height Region trips
+				// an assert() in the SDL 1.2 backend, so never hand one to the driver.
+				if (damageHeight > 0) {
+					Region damageOverlay(slotRegion.x + 1,
+							     slotRegion.y + 1 + static_cast<int>((SLOT_HEIGHT - 2) * hpPercent),
+							     slotRegion.w - 2,
+							     damageHeight);
+					VideoDriver->DrawRect(damageOverlay, COLOR_HP_DAMAGE, true, BlitFlags::BLENDED);
+				}
 			}
 		}
 

@@ -337,6 +337,12 @@ Actor::Actor()
 
 Actor::~Actor(void)
 {
+	// The TBC initiative lists hold raw Actor*. Purge this one before it dies so no
+	// list, and neither currentTurnBasedActor/currentTurnBasedActorOld, can dangle.
+	if (core) {
+		core->tbcManager.RemoveActor(this);
+	}
+
 	delete anims;
 
 	for (ScriptedAnimation* vvc : vfxQueue) {
@@ -6894,7 +6900,10 @@ int Actor::CalculateInitiative(int from)
 
 void Actor::MoveToInitiativeList()
 {
-	if (!core->tbcManager.turnBasedEnable || core->InCutSceneMode() || InInitiativeList() || !GetCurrentStanceAnim().size() || !GetCurrentStanceAnim()[0].first->GetFrame(0)) {
+	// Gate on the feature being engaged (config switch AND runtime toggle), not on
+	// turnBasedEnable alone: with EnableTurnBased=0 this used to still populate the
+	// initiative lists, which drove the whole TBC state machine on vanilla settings.
+	if (!core->IsTurnBasedEnabled() || core->InCutSceneMode() || InInitiativeList() || !GetCurrentStanceAnim().size() || !GetCurrentStanceAnim()[0].first->GetFrame(0)) {
 		return;
 	}
 
@@ -7426,7 +7435,7 @@ void Actor::PerformAttack(ieDword gameTime)
 {
 	if (core->IsTurnBased()) {
 		Timers.lastAttack = gameTime;
-		AttackTurnBased(gameTime);
+		AttackTurnBased();
 		return;
 	}
 
@@ -7747,6 +7756,10 @@ void Actor::PerformAttack(ieDword gameTime)
 
 void Actor::CalculateAttackResult()
 {
+	// No current actor during the environment phase, when IsTurnBased() is still true.
+	if (!core->tbcManager.currentTurnBasedActor) {
+		return;
+	}
 	core->tbcManager.currentTurnBasedActor->lastInit = core->GetGame()->GetGameTimeReal();
 
 	static int attackRollDiceSides = gamedata->GetMiscRule("ATTACK_ROLL_DICE_SIDES");
@@ -7872,7 +7885,11 @@ void Actor::CalculateAttackResult()
 	bool critical = criticalroll >= attackRollDiceSides;
 	bool success = critical;
 	int defence = target->GetDefense(damagetype, wi.wflags, this);
-	int rollMod = ReverseToHit ? defence - target->AC.GetTotal() : 0;
+	// Vanilla formula: the attacker's tohit is the roll modifier, and a hit needs to
+	// beat the defence strictly. This previously rolled with rollMod = 0 for the normal
+	// (non-ReverseToHit) case, which discarded the attack number and every ToHit bonus,
+	// and used >=, which turned ties into hits.
+	int rollMod = ReverseToHit ? defence : tohit;
 	if (!critical) {
 		// autohit immobile enemies (true for atleast stun, sleep, timestop)
 		if (target->Immobile() || (target->GetStat(IE_STATE_ID) & STATE_SLEEP)) {
@@ -7880,7 +7897,7 @@ void Actor::CalculateAttackResult()
 		} else if (roll == 1) {
 			success = false;
 		} else {
-			success = (roll + rollMod) >= (ReverseToHit ? (ToHit.GetTotal() - target->AC.GetTotal()) : (target->AC.GetTotal() - ToHit.GetTotal()));
+			success = (roll + rollMod) > (ReverseToHit ? tohit : defence);
 		}
 	}
 
@@ -8013,7 +8030,7 @@ void Actor::CalculateAttackResult()
 	core->tbcManager.UseMainAction();
 }
 
-void Actor::AttackTurnBased(ieDword gameTime)
+void Actor::AttackTurnBased()
 {
 	Game* game = core->GetGame();
 
@@ -8025,7 +8042,10 @@ void Actor::AttackTurnBased(ieDword gameTime)
 		game->PartyAttack = true;
 	}
 
-	if (Modified[IE_STATE_ID] == STATE_PANIC) {
+	// Bitmask, not equality: IE_STATE_ID routinely carries other flags alongside
+	// STATE_PANIC, so `==` would practically never fire and panicked actors
+	// would keep attacking. This matches how the rest of the file tests it.
+	if (Modified[IE_STATE_ID] & STATE_PANIC) {
 		return;
 	}
 
@@ -8374,10 +8394,10 @@ void Actor::UpdateActorState()
 	}
 
 	const auto& anim = currentStance.anim;
-	if (attackProjectile && !anim.empty()) {
+	if (attackProjectile) {
 		// default so that the projectile fires if we dont have an animation for some reason
-		unsigned int frameCount = anim[0].first->GetFrameCount();
-		unsigned int currentFrame = anim[0].first->GetCurrentFrameIndex();
+		unsigned int frameCount = anim.empty() ? 9 : anim[0].first->GetFrameCount();
+		unsigned int currentFrame = anim.empty() ? 8 : anim[0].first->GetCurrentFrameIndex();
 
 		//IN BG1 and BG2, this is at the ninth frame... (depends on the combat bitmap, which we don't handle yet)
 		// however some critters don't have that long animations (eg. squirrel 0xC400)
@@ -9839,8 +9859,13 @@ HCStrings Actor::SetEquippedQuickSlot(int slot, int header)
 		return HCStrings::count;
 	}
 
-	if (InInitiativeList()) {
-		if (core->tbcManager.currentTurnBasedList != 0 || attackcount != attacksperround) {
+	if (core->IsTurnBased() && InInitiativeList()) {
+		// Switching weapons mid-round invalidates the queued attack, so refuse once
+		// this actor has already spent attacks. The old condition also tested the
+		// GLOBAL currentTurnBasedList, so as soon as any actor took a second attack
+		// the whole fight silently refused every quickslot change, for everyone.
+		if (attackcount != attacksperround) {
+			Log(DEBUG, "Actor", "SetEquippedQuickSlot: actor already attacked this round");
 			return HCStrings::count;
 		}
 		RemoveFromAdditionInitiativeLists();

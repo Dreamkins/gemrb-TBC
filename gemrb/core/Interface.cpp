@@ -1812,7 +1812,9 @@ Actor* Interface::SummonCreature(const ResRef& resource, const ResRef& animRes, 
 			// set up the summon disable effect
 			Effect* newfx = EffectQueue::CreateEffect(fx_summon_disable_ref, 0, 1, FX_DURATION_ABSOLUTE);
 			if (newfx) {
-				newfx->Duration = vvc->GetSequenceDuration(Time.defaultTicksPerSec) * 9 / 10 + core->GetGame()->GetGameTimeReal();
+				// Duration is in the GetGameTime() domain (EffectQueue compares it against that
+				// clock), so it must not be built on the raw clock.
+				newfx->Duration = vvc->GetSequenceDuration(Time.defaultTicksPerSec) * 9 / 10 + core->GetGame()->GetGameTime();
 				ApplyEffect(newfx, ab, ab);
 			}
 		}
@@ -2530,7 +2532,12 @@ void Interface::LoadGame(Holder<SaveGame> sg, GAMVersion override)
 	// and the loading can fail for various reasons
 
 	// Yes, it uses goto. Other ways seemed too awkward for me.
-	if (IsTurnBased()) {
+	// Purge whenever the feature is engaged, not merely when state is live: the
+	// initiative lists hold raw Actor* into the object set that this load is about
+	// to swap out, so any stale entry dangles. IsTurnBased() is false before the
+	// first EndTurn (the clock is still pinned at 0), which is exactly when stale
+	// pointers are most likely to survive.
+	if (IsTurnBasedEnabled()) {
 		resetTurnBased();
 	}
 	gamedata->SaveAllStores();
@@ -4060,9 +4067,10 @@ bool Interface::SetPause(PauseState pause, int flags) const
 {
 	GameControl* gc = GetGameControl();
 
-	if (core->IsTurnBased()) {
-		return false;
-	}
+	// Pausing is a UI action - Autopause, text screens, save/load and AskAndExit all
+	// route through here. A blanket refusal during turn-based combat silently broke
+	// every one of them. The state machine already tolerates a frozen clock, because
+	// UpdateTurnBased only runs from the unpaused update path.
 
 	//don't allow soft pause in cutscenes and dialog
 	if (!(flags & PF_FORCED) && InCutSceneMode()) gc = nullptr;

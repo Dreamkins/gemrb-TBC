@@ -22,6 +22,7 @@
 #include "Map.h"
 
 #include "GUI/GameControl.h"
+#include "Logging/Logging.h"
 #include "Scriptable/Actor.h"
 
 #include <algorithm>
@@ -124,6 +125,21 @@ void TurnBasedCombatManager::InitTurnBasedSlot()
 		}
 	}
 
+	// The delayed attack is being played out now, so consume the flag. Nothing else
+	// ever clears it: leaving it set would keep the actor out of the movesleft /
+	// free-action grant for the rest of the combat, and make it ineligible for a
+	// further delay, because EndTurn refuses to re-delay a slot that is already marked.
+	if (slot) {
+		slot->delayaction = false;
+	}
+
+	// No slot means no current actor (empty list, or currentTurnBasedList out of range).
+	// Everything below dereferences the actor, so stop here and let the caller's own
+	// null check decide what to do; the environment phase reaches this legitimately.
+	if (!currentTurnBasedActor) {
+		return;
+	}
+
 	if (currentTurnBasedActor->IsPC() && currentTurnBasedActor->GetStance() != IE_ANI_CAST) {
 		currentTurnBasedActor->ClearPath(true);
 		currentTurnBasedActor->ClearActions();
@@ -145,6 +161,9 @@ void TurnBasedCombatManager::FirstRoundStart()
 
 	if (roundTurnBased == 1) {
 		timeTurnBased = core->GetGame()->GetGameTimeReal();
+		// timeTurnBased counts GameTime ticks, so the delta baseline must start here
+		// or the first update would add the whole elapsed game time in one step.
+		lastRealTime = timeTurnBased;
 	} else {
 		for (size_t idx = 0; idx < initiatives[0].size(); idx++) {
 			initiatives[0][idx].initiative = initiatives[0][idx].actor->CalculateInitiative();
@@ -168,10 +187,10 @@ void TurnBasedCombatManager::FirstRoundStart()
 		}
 	}
 
-	for (size_t attacks = 1; attacks < MAX_ATTACK_LISTS; attacks++) {
+	for (size_t attacks = 1; attacks < static_cast<size_t>(MAX_ATTACK_LISTS); attacks++) {
 		initiatives[attacks].clear();
 		for (size_t idx = 0; idx < initiatives[0].size(); idx++) {
-			if (initiatives[0][idx].actor->attackcount >= attacks + 1) {
+			if (initiatives[0][idx].actor->attackcount >= static_cast<int>(attacks) + 1) {
 				initiatives[attacks].push_back(initiatives[0][idx]);
 				initiatives[attacks].back().haveaction = true;
 				initiatives[attacks].back().havefreeaction = false;
@@ -199,7 +218,10 @@ void TurnBasedCombatManager::EndTurn()
 		return;
 	}
 
-	if (currentTurnBasedActorOld) {
+	// currentTurnBasedActorOld is a raw Actor* held across frames while the opportunist
+	// acts, and nothing purges it if that actor dies in the meantime. Only restore if
+	// it is still alive; otherwise drop the saved state and end the turn normally.
+	if (currentTurnBasedActorOld && !(currentTurnBasedActorOld->GetInternalFlag() & (IF_JUSTDIED | IF_REALLYDIED | IF_CLEANUP))) {
 		if (currentTurnBasedActor->IsPC()) {
 			core->GetGame()->SelectActor(currentTurnBasedActor, false, SELECT_REPLACE);
 		}
@@ -220,22 +242,29 @@ void TurnBasedCombatManager::EndTurn()
 		displaymsg->DisplayString(std::move(rollLog), GUIColors::GOLD, 0);
 		return;
 	}
+	currentTurnBasedActorOld = nullptr;
 
 	Actor* actor = currentTurnBasedActor;
 
 	if (actor->InInitiativeList()) {
+		size_t listSize = initiatives[currentTurnBasedList].size();
 		currentTurnBasedSlot = 0;
-		for (size_t idx = 0; idx < initiatives[currentTurnBasedList].size(); idx++) {
+		bool foundInList = false;
+		for (size_t idx = 0; idx < listSize; idx++) {
 			if (initiatives[currentTurnBasedList][idx].actor == currentTurnBasedActor) {
 				currentTurnBasedSlot = idx;
+				foundInList = true;
 				break;
 			}
 		}
 
-		// delayed attack
-		if (actor->GetStance() != IE_ANI_DIE && actor->GetStance() != IE_ANI_TWITCH && actor->GetStance() != IE_ANI_SLEEP &&
+		// delayed attack. Requires the actor to have actually been located in THIS list:
+		// otherwise currentTurnBasedSlot stays 0 and we would delay a different actor's
+		// slot. The listSize > 0 test also keeps `size() - 1` from wrapping on an empty list.
+		if (foundInList && listSize > 0 && actor->GetStance() != IE_ANI_DIE && actor->GetStance() != IE_ANI_TWITCH &&
+		    actor->GetStance() != IE_ANI_SLEEP &&
 		    !(actor->Immobile() || (actor->Modified[IE_STATE_ID] & (STATE_CANTMOVE | STATE_PANIC))) && HasMainAction() &&
-		    currentTurnBasedSlot < initiatives[currentTurnBasedList].size() - 1) {
+		    static_cast<size_t>(currentTurnBasedSlot) < listSize - 1) {
 			InitiativeSlot* slot = GetCurrentTurnBasedSlot();
 			if (slot && !slot->delayaction) {
 				InitiativeSlot delayedSlot = *slot;
@@ -248,7 +277,7 @@ void TurnBasedCombatManager::EndTurn()
 		}
 	}
 
-	if (currentTurnBasedSlot >= initiatives[currentTurnBasedList].size()) {
+	if (currentTurnBasedSlot >= static_cast<int>(initiatives[currentTurnBasedList].size())) {
 		currentTurnBasedSlot = 0;
 
 		while (currentTurnBasedList < MAX_ATTACK_LISTS) {
@@ -289,7 +318,9 @@ void TurnBasedCombatManager::EndTurn()
 				}
 			}
 
-			if (initiatives[currentTurnBasedList].size()) {
+			// currentTurnBasedList was just incremented and can be MAX_ATTACK_LISTS here;
+			// initiatives only has MAX_ATTACK_LISTS elements, so reading it unguarded is OOB.
+			if (currentTurnBasedList < MAX_ATTACK_LISTS && initiatives[currentTurnBasedList].size()) {
 				// Copy havefreeaction from previous phase for each actor
 				for (auto& slot : initiatives[currentTurnBasedList]) {
 					for (const auto& prevSlot : initiatives[currentTurnBasedList - 1]) {
@@ -320,7 +351,7 @@ void TurnBasedCombatManager::EndTurn()
 
 	InitTurnBasedSlot();
 
-	if (currentTurnBasedActor->IsPC()) {
+	if (currentTurnBasedActor && currentTurnBasedActor->IsPC()) {
 		core->GetGame()->SelectActor(currentTurnBasedActor, true, SELECT_REPLACE);
 	}
 }
@@ -334,12 +365,22 @@ void TurnBasedCombatManager::UpdateTurnBased()
 			pause_before_fight--;
 		}
 
-		if (timeTurnBased <= timeTurnBasedNeed) {
-			if (timeTurnBased == timeTurnBasedNeed) {
-				timeTurnBasedNeed = 0;
-			} else {
-				timeTurnBased++;
-			}
+		// Advance timeTurnBased by the ticks that actually elapsed, not one per frame.
+		// timeTurnBasedNeed is in GameTime ticks (round_sec * defaultTicksPerSec),
+		// and GetGameTime() hands timeTurnBased to every tick-scheduled effect
+		// (poison damage, detect evil pulses, screen shake), so a per-frame increment
+		// both compressed every round and ran those effects off the frame rate.
+		uint32_t realNow = game->GetGameTimeReal();
+		if (realNow != lastRealTime) {
+			timeTurnBased += realNow - lastRealTime;
+			lastRealTime = realNow;
+		}
+
+		// The round is over once the clock reaches the deadline. Compare with >=, not ==:
+		// the clock now moves by more than one tick per frame, so it would step over
+		// an exact match and the deadline would never be released.
+		if (timeTurnBased >= timeTurnBasedNeed) {
+			timeTurnBasedNeed = 0;
 		}
 
 		// remove dead actors
@@ -361,7 +402,7 @@ void TurnBasedCombatManager::UpdateTurnBased()
 		}
 
 		// Validate currentTurnBasedSlot after removing dead actors
-		if (currentTurnBasedList < 10 && currentTurnBasedSlot >= initiatives[currentTurnBasedList].size()) {
+		if (currentTurnBasedList < MAX_ATTACK_LISTS && currentTurnBasedSlot >= static_cast<int>(initiatives[currentTurnBasedList].size())) {
 			currentTurnBasedSlot = initiatives[currentTurnBasedList].size() > 0 ? initiatives[currentTurnBasedList].size() - 1 : 0;
 		}
 
@@ -386,12 +427,23 @@ void TurnBasedCombatManager::UpdateTurnBased()
 			}
 		}
 
+		// Re-find the current actor after the dead-slot erase above. If it is no longer in
+		// this list, falling back to slot 0 would silently hand its action points to
+		// whichever actor happens to be first, so say so and drop the current actor
+		// instead of pointing the turn at the wrong slot.
 		currentTurnBasedSlot = 0;
+		bool foundCurrentActor = false;
 		for (size_t idx = 0; idx < initiatives[currentTurnBasedList].size(); idx++) {
 			if (initiatives[currentTurnBasedList][idx].actor == currentTurnBasedActor) {
 				currentTurnBasedSlot = idx;
+				foundCurrentActor = true;
 				break;
 			}
+		}
+		if (!foundCurrentActor && currentTurnBasedActor) {
+			Log(WARNING, "TurnBasedCombatManager", "current actor is not in initiative list {} at slot {}; dropping it",
+			    currentTurnBasedList, currentTurnBasedSlot);
+			currentTurnBasedActor = nullptr;
 		}
 
 		// opportunity attacks
@@ -401,6 +453,7 @@ void TurnBasedCombatManager::UpdateTurnBased()
 			    (game->GetActorByGlobalID(opportunity)->GetInternalFlag() & (IF_JUSTDIED | IF_REALLYDIED | IF_CLEANUP))) {
 				opportunists.clear();
 				opportunity = 0;
+				lasOpportunityPos.Invalidate();
 			} else if (!currentTurnBasedActorOld) { // no current opportunist
 				Actor* opportunist = nullptr;
 				while (opportunists.size()) {
@@ -452,6 +505,7 @@ void TurnBasedCombatManager::UpdateTurnBased()
 				} else {
 					opportunity = 0;
 					opportunists.clear();
+					lasOpportunityPos.Invalidate();
 				}
 			}
 		}
@@ -509,10 +563,35 @@ void TurnBasedCombatManager::resetTurnBased()
 	currentTurnBasedActorOld = nullptr;
 	opportunity = 0;
 	opportunists.clear();
+	// Must be invalidated too: Movable::DoStep only re-checks for opportunity attacks
+	// when lasOpportunityPos != Pos, so a leftover value from a previous fight would
+	// suppress the check for that tile forever.
+	lasOpportunityPos.Invalidate();
 	roundTurnBased = 0;
 	timeTurnBased = 0;
 	timeTurnBasedNeed = 0;
+	lastRealTime = 0;
 	pause_before_fight = 10;
+}
+
+void TurnBasedCombatManager::RemoveActor(Actor* actor)
+{
+	if (!actor) return;
+
+	for (int i = 0; i < MAX_ATTACK_LISTS; i++) {
+		initiatives[i].erase(std::remove_if(initiatives[i].begin(), initiatives[i].end(),
+						    [actor](const InitiativeSlot& slot) { return slot.actor == actor; }),
+				     initiatives[i].end());
+	}
+	if (currentTurnBasedActor == actor) {
+		currentTurnBasedActor = nullptr;
+	}
+	if (currentTurnBasedActorOld == actor) {
+		currentTurnBasedActorOld = nullptr;
+	}
+	currentTurnBasedListOld = 0;
+	currentTurnBasedSlotOld = 0;
+	// opportunists holds global IDs, not pointers, so there is nothing to purge there.
 }
 
 bool TurnBasedCombatManager::HasFreeAction() const
@@ -557,6 +636,22 @@ bool TurnBasedCombatManager::UseMainAction()
 		return true;
 	}
 	return false;
+}
+
+bool TurnBasedCombatManager::SpendMainAction(Actor* actor)
+{
+	if (!core->IsTurnBased()) return true;
+	// No actor on turn (environment phase, or nobody has moved yet): charging is a
+	// no-op anyway, so only reject when someone else's turn is really being spent.
+	if (currentTurnBasedActor && actor != currentTurnBasedActor) return false;
+	return UseMainAction();
+}
+
+bool TurnBasedCombatManager::SpendFreeAction(Actor* actor)
+{
+	if (!core->IsTurnBased()) return true;
+	if (currentTurnBasedActor && actor != currentTurnBasedActor) return false;
+	return UseFreeAction();
 }
 
 bool TurnBasedCombatManager::UseAllMainActions()

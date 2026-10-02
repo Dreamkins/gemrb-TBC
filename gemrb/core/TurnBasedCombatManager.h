@@ -94,8 +94,12 @@ public:
 	// Timing
 	// -------------------------------------------------------------------------
 
-	uint32_t timeTurnBased = 0; // Current time in TBC mode
-	uint32_t timeTurnBasedNeed = 0; // Time needed for current action
+	uint32_t timeTurnBased = 0; // Current time in TBC mode, in GameTime ticks
+	uint32_t timeTurnBasedNeed = 0; // Time needed for current action, same tick units
+	// Real-clock reading that timeTurnBased was last advanced from. GameTime ticks
+	// elapse at defaultTicksPerSec per second, not once per frame, and timeTurnBased
+	// is what GetGameTime() returns during combat - so it has to follow the real clock.
+	uint32_t lastRealTime = 0;
 	int lastTurnBasedTarget = 0; // Last target ID
 
 	// -------------------------------------------------------------------------
@@ -152,6 +156,13 @@ public:
 	// Use main action for current actor (returns true if had main action)
 	bool UseMainAction();
 
+	// Spend an action on behalf of a SPECIFIC actor. UseMainAction/UseFreeAction always
+	// debit currentTurnBasedActor, so calling them straight from a script action let a
+	// bystander's script drain the turn of whoever happened to be on turn. These refuse
+	// when a turn is genuinely in progress and the caller is not the actor on it.
+	bool SpendMainAction(Actor* actor);
+	bool SpendFreeAction(Actor* actor);
+
 	// Use all main actions in all phases for current actor (for spellcasting)
 	bool UseAllMainActions();
 
@@ -173,6 +184,11 @@ public:
 
 	// Reset/clear TBC state
 	void resetTurnBased();
+
+	// Drop every reference to an actor that is being destroyed. The initiative lists
+	// hold raw Actor*, so without this a deleted actor dangles until the next
+	// resetTurnBased(). Called from ~Actor.
+	void RemoveActor(Actor* actor);
 
 	// Toggle TBC mode
 	void ToggleTurnBased();

@@ -754,7 +754,6 @@ void Map::UpdateScripts()
 				bool cantMove = core->tbcManager.opportunity || actor->GetRandomBackoff() || !actor->InMove() || actor->Immobile() || !actor->GetPath() || (actor->Modified[IE_STATE_ID] & STATE_CANTMOVE);
 				bool notAttackNow = !actor->InAttack();
 				if (notPlayerControl && cantMove && notAttackNow) {
-					const Actor* target = area->GetActorByGlobalID(objects.LastTarget);
 					if (actor->lastInit && game->GetGameTimeReal() - actor->lastInit > 20) {
 						core->EndTurn();
 					}

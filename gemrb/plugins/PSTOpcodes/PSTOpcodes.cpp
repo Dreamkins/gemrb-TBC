@@ -488,7 +488,7 @@ int fx_tint_screen(Scriptable* /*Owner*/, Actor* /*target*/, Effect* fx)
 		Color initialTint;
 		if (fx->FirstApply) {
 			initialTint = core->GetWindowManager()->FadeColor; // current global lighting
-			fx->Parameter4 = fx->Duration - core->GetGame()->GetGameTimeReal(); // estimate amount of steps
+			fx->Parameter4 = fx->Duration - core->GetGame()->GetGameTime(); // estimate amount of steps
 			fx->Parameter5 = initialTint.Packed();
 			fx->Parameter3 = fx->Parameter4;
 		} else {
@@ -497,7 +497,9 @@ int fx_tint_screen(Scriptable* /*Owner*/, Actor* /*target*/, Effect* fx)
 		tintMin = initialTint;
 		tintMax = fadeColor;
 		ieDword div = fx->IsVariable == 0 ? fx->Parameter4 : fx->IsVariable;
-		step = (fadeColor - initialTint) / div;
+		// Parameter4 is a Duration - GetGameTime() difference, which is 0 on the first
+		// step of a tint whose deadline has already passed. Dividing by that is UB.
+		step = div ? (fadeColor - initialTint) / div : Color();
 		// 		if (ColorBoundInfringed(core->GetWindowManager()->FadeColor + step, tintMin, tintMax) != 0) {
 		// 			core->GetWindowManager()->FadeColor = tintNone;
 		// 			return FX_NOT_APPLIED;
@@ -558,7 +560,7 @@ int fx_tint_screen(Scriptable* /*Owner*/, Actor* /*target*/, Effect* fx)
 			// maintain color after fade-in
 			if (!fx->Parameter6) {
 				core->GetWindowManager()->FadeColor = fadeColor;
-				if (fx->Duration == core->GetGame()->GetGameTimeReal()) core->timer.SetFadeFromColor(fromTime, 2);
+				if (fx->Duration == core->GetGame()->GetGameTime()) core->timer.SetFadeFromColor(fromTime, 2);
 			}
 
 			// bit (4) Temporary durations maintain first bound infringement, then fade back to starting global
@@ -599,7 +601,7 @@ int fx_tint_screen(Scriptable* /*Owner*/, Actor* /*target*/, Effect* fx)
 				return FX_NOT_APPLIED;
 			}
 			// about to expire
-			if (fx->Duration == core->GetGame()->GetGameTimeReal()) core->timer.SetFadeFromColor(core->Time.defaultTicksPerSec);
+			if (fx->Duration == core->GetGame()->GetGameTime()) core->timer.SetFadeFromColor(core->Time.defaultTicksPerSec);
 			break;
 		case 200: // supposed to fade currently active area tint back to its starting global lighting, but just kills it
 			core->timer.SetFadeToColor(1);

@@ -860,7 +860,7 @@ public:
 	bool GetCombatDetails(int& tohit, bool leftorright,
 			      int& DamageBonus, int& speed, int& CriticalBonus, int& style, const Actor* target);
 	/* attack turn based */
-	void AttackTurnBased(ieDword gameTime);
+	void AttackTurnBased();
 	/* calculate result of attack */
 	void CalculateAttackResult();
 	/* performs attack against target */

@@ -128,7 +128,13 @@ void OverHeadText::Draw()
 	for (auto msgIter = messages.begin(); msgIter != messages.end(); ++msgIter) {
 		auto& msg = *msgIter;
 		if (msg.timeStartDisplaying == 0) continue;
-		if (msg.Draw(height, owner->Pos + Point(0, (messages.size() - (msgIter - messages.begin())) * -10), owner->Type)) {
+		// Stacking several floating messages is a TBC affordance; 0.9.5 drew them all
+		// at owner->Pos, so only offset when turn-based combat is actually running.
+		Point msgPos = owner->Pos;
+		if (core->IsTurnBased()) {
+			msgPos.y += (messages.size() - (msgIter - messages.begin())) * -10;
+		}
+		if (msg.Draw(height, msgPos, owner->Type)) {
 			show = true;
 		} else if (msgIter != messages.begin()) { // always keep the one reserved slot
 			msgIter = messages.erase(msgIter);
@@ -189,7 +195,13 @@ bool OverHeadMsg::Draw(int heightOffset, const Point& fallbackPos, int ownerType
 	if (delay != maxDelay) {
 		rgn.y -= maxScrollOffset - scrollOffset.y;
 		// rgn.h will be adjusted automatically, we don't need to worry about accidentally hiding other msgs
-		scrollOffset.y = maxScrollOffset + time / 4;
+		// 0.9.5 advanced 2px per tick; the time-derived position is the TBC behaviour and
+		// must not leak into games that only have ONSCREEN_TEXT.
+		if (core->IsTurnBased()) {
+			scrollOffset.y = maxScrollOffset + time / 4;
+		} else {
+			scrollOffset.y -= 2;
+		}
 	}
 
 	if (core->HasFeature(GFFlags::RULES_3ED) || core->HasFeature(GFFlags::HAS_EE_EFFECTS)) {

@@ -34,11 +34,23 @@ list of [options, tips and priorities](https://github.com/gemrb/gemrb/blob/maste
 
 This fork adds a full turn-based combat mode inspired by D&D 5e while preserving the original AD&D 2e mechanics.
 
+### Enabling the mode
+
+Turn-based combat is gated by a master switch that is **off by default**. Nothing in this
+mode runs — no initiative list, no panel, no action costs — until you set it in `GemRB.cfg`:
+
+```ini
+EnableTurnBased=1
+```
+
+With the switch off, the engine behaves exactly like upstream 0.9.5. `Enter` only toggles
+the runtime on/off state and does nothing at all while `EnableTurnBased=0`.
+
 ### Controls
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Toggle turn-based mode (enabled by default). If something goes wrong, you can continue the battle in real-time with active pause |
+| `Enter` | Toggle turn-based mode (requires `EnableTurnBased=1`). If something goes wrong, you can continue the battle in real-time with active pause |
 | `Space` | End current character's turn |
 | `Mouse wheel` | Scroll the initiative panel |
 
@@ -48,7 +60,7 @@ A horizontal panel at the top of the screen displays portraits of all combat par
 
 **Slot Elements:**
 - **Character portrait** — clickable for selection
-- **Movement bar** (below portrait) — shows remaining movement distance
+- **Movement bar** (above portrait) — shows remaining movement distance
 - **Green square** — main action available
 - **Yellow square** — free action available
 - **Line** — connects attacker and target during opportunity attack (when active)
@@ -110,7 +122,7 @@ One per entire turn (all attack phases). If unused — carries over to the next 
 #### Movement
 
 - Each character can move a distance based on their speed
-- Movement bar below portrait shows remaining allowance
+- Movement bar above portrait shows remaining allowance
 - Movement does not cost actions — you can move and attack in any order
 
 **Movement Rules (D&D 5e inspired):**
@@ -120,7 +132,7 @@ One per entire turn (all attack phases). If unused — carries over to the next 
 | Enemies block | Enemy characters are impassable obstacles |
 | Allies passable | You can move through allied characters |
 | Ally penalty | Moving through an ally costs extra movement |
-| No stacking | Cannot end turn on an ally's tile — auto-repositions back |
+| No stacking | Cannot attack while standing on an ally's tile — the action is cancelled with a message |
 | No bumping | Characters don't push each other in TBC mode |
 | Precise paths | Optimal pathfinding algorithm (no shortcuts) |
 

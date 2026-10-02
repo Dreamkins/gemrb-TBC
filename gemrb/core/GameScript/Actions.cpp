@@ -2543,14 +2543,6 @@ void GameScript::PickLock(Scriptable* Sender, Action* parameters)
 	//only actors may try to pick a lock
 	Actor* actor = Scriptable::As<Actor>(Sender);
 
-	if (core->IsTurnBased() && actor && actor->InInitiativeList()) {
-		if (actor != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0 || !core->tbcManager.HasMainAction()) {
-			return;
-		}
-		core->tbcManager.UseMainAction();
-		actor->RemoveFromAdditionInitiativeLists();
-	}
-
 	if (!actor) {
 		Sender->ReleaseCurrentAction();
 		return;
@@ -2559,6 +2551,16 @@ void GameScript::PickLock(Scriptable* Sender, Action* parameters)
 	if (!tar) {
 		Sender->ReleaseCurrentAction();
 		return;
+	}
+
+	// Charge the action only once the target is known to be valid: doing it first
+	// burned the actor's main action even when the script named no lock at all.
+	if (core->IsTurnBased() && actor->InInitiativeList()) {
+		if (actor != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0 || !core->tbcManager.HasMainAction()) {
+			return;
+		}
+		core->tbcManager.UseMainAction();
+		actor->RemoveFromAdditionInitiativeLists();
 	}
 	unsigned int distance;
 	const Point* p;
@@ -2612,13 +2614,11 @@ void GameScript::OpenDoor(Scriptable* Sender, Action* parameters)
 	Actor* actor = Scriptable::As<Actor>(Sender);
 
 	bool wasLocked = door->Flags & DOOR_LOCKED;
-	if (actor) {
-		actor->SetModal(Modal::None);
-		if (!door->TryUnlock(actor)) {
-			return;
-		}
-	}
-	// TBC: opening unlocked door = free action, locked door (picking) = main action
+
+	// TBC: opening unlocked door = free action, locked door (picking) = main action.
+	// Gate BEFORE touching the door - TryUnlock consumes and deletes the key, so
+	// charging afterwards destroyed a key for an action the turn-based rules then
+	// rejected. CloseDoor below already orders it this way.
 	if (core->IsTurnBased() && actor && actor->InInitiativeList()) {
 		if (actor != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0) {
 			return;
@@ -2635,6 +2635,13 @@ void GameScript::OpenDoor(Scriptable* Sender, Action* parameters)
 			if (!core->tbcManager.UseFreeAction()) {
 				return;
 			}
+		}
+	}
+
+	if (actor) {
+		actor->SetModal(Modal::None);
+		if (!door->TryUnlock(actor)) {
+			return;
 		}
 	}
 
@@ -5268,14 +5275,17 @@ void GameScript::RemoveMapnote(Scriptable* Sender, Action* parameters)
 
 void GameScript::AttackOneRound(Scriptable* Sender, Action* parameters)
 {
-	Actor* actor = Scriptable::As<Actor>(Sender);
-
-	if (core->IsTurnBased() && actor->GetStat(IE_EA) == EA_PC) {
+	// Check the type before the cast is dereferenced: Scriptable::As<Actor> is a
+	// dynamic_cast and yields nullptr for a non-Actor Sender, which this function
+	// explicitly tolerates below.
+	if (Sender->Type != ST_ACTOR) {
+		Sender->ReleaseCurrentAction();
 		return;
 	}
 
-	if (Sender->Type != ST_ACTOR) {
-		Sender->ReleaseCurrentAction();
+	Actor* actor = Scriptable::As<Actor>(Sender);
+
+	if (core->IsTurnBased() && actor->GetStat(IE_EA) == EA_PC) {
 		return;
 	}
 	//using auto target!
@@ -6080,7 +6090,7 @@ void GameScript::PlayBardSong(Scriptable* Sender, Action* parameters)
 	}
 
 	// TBC: activating modal aura costs main action
-	if (core->IsTurnBased() && !core->tbcManager.UseMainAction()) {
+	if (!core->tbcManager.SpendMainAction(actor)) {
 		return;
 	}
 	actor->SetModalSpell(Modal::BattleSong, songs[songIdx]);
@@ -6094,7 +6104,7 @@ void GameScript::BattleSong(Scriptable* Sender, Action* /*parameters*/)
 		return;
 	}
 	// TBC: activating modal aura costs main action
-	if (core->IsTurnBased() && !core->tbcManager.UseMainAction()) {
+	if (!core->tbcManager.SpendMainAction(actor)) {
 		return;
 	}
 	actor->SetModal(Modal::BattleSong);
@@ -6107,7 +6117,7 @@ void GameScript::FindTraps(Scriptable* Sender, Action* /*parameters*/)
 		return;
 	}
 	// TBC: activating modal aura costs main action
-	if (core->IsTurnBased() && !core->tbcManager.UseMainAction()) {
+	if (!core->tbcManager.SpendMainAction(actor)) {
 		return;
 	}
 	actor->SetModal(Modal::DetectTraps);
@@ -6123,11 +6133,11 @@ void GameScript::Hide(Scriptable* Sender, Action* /*parameters*/)
 	// TBC: spend action before attempting hide
 	if (core->IsTurnBased() && actor->InInitiativeList()) {
 		if (actor->GetThiefLevel() > 0) {
-			if (!core->tbcManager.UseFreeAction()) {
+			if (!core->tbcManager.SpendFreeAction(actor)) {
 				return;
 			}
 		} else {
-			if (!core->tbcManager.UseMainAction()) {
+			if (!core->tbcManager.SpendMainAction(actor)) {
 				return;
 			}
 		}
@@ -6149,7 +6159,7 @@ void GameScript::Unhide(Scriptable* Sender, Action* /*parameters*/)
 
 	if (actor->Modal.State == Modal::Stealth) {
 		// TBC: deactivating modal aura costs free action
-		if (core->IsTurnBased() && !core->tbcManager.UseFreeAction()) {
+		if (!core->tbcManager.SpendFreeAction(actor)) {
 			return;
 		}
 		actor->SetModal(Modal::None);
@@ -6172,7 +6182,7 @@ void GameScript::Turn(Scriptable* Sender, Action* /*parameters*/)
 	if (skill < 1) return;
 
 	// TBC: activating modal aura costs main action
-	if (core->IsTurnBased() && !core->tbcManager.UseMainAction()) {
+	if (!core->tbcManager.SpendMainAction(actor)) {
 		return;
 	}
 	actor->SetModal(Modal::TurnUndead);
@@ -7001,7 +7011,6 @@ void GameScript::UseItem(Scriptable* Sender, Action* parameters)
 			return;
 		}
 	}
-	int itemSpeed = hh->Speed;
 	ieWord itemType = itm->ItemType;
 	gamedata->FreeItem(itm, itemres, false);
 

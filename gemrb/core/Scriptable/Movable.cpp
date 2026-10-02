@@ -286,15 +286,24 @@ void Movable::DoStep(unsigned int walkScale, ieDword time)
 			} else {
 				// Ally in the way - check if enough movement to pass through
 				// Need enough to enter AND exit (2x penalty)
+				// currentTurnBasedActor is a cached pointer and can outlive its slot, so
+				// the slot lookup can still come back null here.
+				auto* tbcSlot = core->GetCurrentTurnBasedSlot();
+				if (!tbcSlot) {
+					// No movement budget to check or charge - stop.
+					ClearPath(true);
+					NewOrientation = Orientation;
+					return;
+				}
 				float passThruPenalty = 0.05f;
-				if (core->GetCurrentTurnBasedSlot()->movesleft < passThruPenalty * 2) {
+				if (tbcSlot->movesleft < passThruPenalty * 2) {
 					// Not enough movement to pass through - stop before ally
 					ClearPath(true);
 					NewOrientation = Orientation;
 					return;
 				}
 				// Pass through with extra movement cost
-				core->GetCurrentTurnBasedSlot()->movesleft -= passThruPenalty;
+				tbcSlot->movesleft -= passThruPenalty;
 				// Continue movement - don't return
 			}
 		} else {
@@ -335,16 +344,21 @@ void Movable::DoStep(unsigned int walkScale, ieDword time)
 
 	// TBC: consume movement points
 	if (core->IsTurnBased() && actor && actor == core->tbcManager.currentTurnBasedActor) {
-		float dist = SquaredDistance(Pos, newPos);
-		int speed = actor->GetSpeed() ? gamedata->GetStepTime() / actor->GetSpeed() : 0;
-		if (speed > 0) {
-			core->GetCurrentTurnBasedSlot()->movesleft -= dist / (speed * core->Time.defaultTicksPerSec * core->Time.round_sec * 10);
-		}
+		// The cached currentTurnBasedActor can outlive its slot (dead-slot erase, list
+		// purge), so resolve the slot once and tolerate it being gone.
+		auto* tbcSlot = core->GetCurrentTurnBasedSlot();
+		if (tbcSlot) {
+			float dist = SquaredDistance(Pos, newPos);
+			int speed = actor->GetSpeed() ? gamedata->GetStepTime() / actor->GetSpeed() : 0;
+			if (speed > 0) {
+				tbcSlot->movesleft -= dist / (speed * core->Time.defaultTicksPerSec * core->Time.round_sec * 10);
+			}
 
-		if (core->GetCurrentTurnBasedSlot()->movesleft <= 0) {
-			ClearPath(true);
-			NewOrientation = Orientation;
-			return;
+			if (tbcSlot->movesleft <= 0) {
+				ClearPath(true);
+				NewOrientation = Orientation;
+				return;
+			}
 		}
 
 		// TBC: check for opportunity attacks

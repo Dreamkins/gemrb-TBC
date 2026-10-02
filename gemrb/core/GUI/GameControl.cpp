@@ -1172,12 +1172,17 @@ bool GameControl::OnKeyRelease(const KeyboardEvent& key, unsigned short mod)
 	switch (key.keycode) {
 		//FIXME: move these to guiscript
 		case GEM_ESCAPE:
-			if (core->IsTurnBased() && core->tbcManager.currentTurnBasedActor->IsPC()) {
+			// currentTurnBasedActor is null during the environment phase, when IsTurnBased()
+			// is still true (timeTurnBased < timeTurnBasedNeed with no current actor).
+			if (core->tbcManager.currentTurnBasedActor && core->tbcManager.currentTurnBasedActor->IsPC()) {
 				core->tbcManager.currentTurnBasedActor->ReleaseCurrentAction();
 			}
 			break;
 		case GEM_RETURN:
-			if (core->IsTurnBased()) {
+			// IsTurnBasedEnabled(), not IsTurnBased(): the latter is only true once state is
+			// live, which made this branch reachable only when TBC was already on, so the
+			// toggle could turn it off but never back on.
+			if (core->IsTurnBasedEnabled()) {
 				core->ToggleTurnBased();
 			}
 			break;
@@ -2360,7 +2365,10 @@ bool GameControl::OnMouseUp(const MouseEvent& me, unsigned short Mod)
 		}
 
 		if (targetMode == TargetMode::None && (isSelectionRect || lastActorID)) {
-			if (core->IsTurnBased() && GetLastActor()) {
+			// Only take over the plain single-actor click. A drag rectangle or a
+			// shift-click is orthogonal to turn-based targeting, and replacing the
+			// whole branch removed box selection and shift-selection outright.
+			if (core->IsTurnBased() && !isSelectionRect && !(Mod & GEM_MOD_SHIFT) && GetLastActor()) {
 				ieDword type = GetLastActor()->GetStat(IE_EA);
 				if (type >= EA_EVILCUTOFF || type == EA_GOODBUTRED) {
 					PerformSelectedAction(GetLastActor()->Pos);

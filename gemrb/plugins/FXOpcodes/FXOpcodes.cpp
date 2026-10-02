@@ -18,6 +18,7 @@
  *
  */
 
+#include "damages.h"
 #include "defsounds.h"
 #include "ie_feats.h" //cannot avoid declaring these
 #include "ie_stats.h"
@@ -40,7 +41,6 @@
 #include "ScriptedAnimation.h"
 #include "Spell.h" //needed for fx_cast_spell feedback
 #include "TileMap.h" //needs for knock!
-#include "damages.h"
 
 #include "GUI/GameControl.h"
 #include "GameScript/GSUtils.h" //needs for MoveBetweenAreasCore
@@ -7436,7 +7436,7 @@ int fx_screenshake(Scriptable* /*Owner*/, Actor* /*target*/, Effect* fx)
 	int count;
 
 	if (fx->TimingMode != FX_PERMANENT) {
-		count = fx->Duration - core->GetGame()->GetGameTimeReal();
+		count = fx->Duration - core->GetGame()->GetGameTime();
 	} else {
 		count = core->Time.round_size;
 	}
