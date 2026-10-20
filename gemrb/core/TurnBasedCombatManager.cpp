@@ -43,9 +43,13 @@ InitiativeSlot* TurnBasedCombatManager::GetCurrentTurnBasedSlot()
 		return nullptr;
 	}
 
+	if (currentTurnBasedSlot < 0) {
+		return nullptr;
+	}
+
 	size_t slot = static_cast<size_t>(currentTurnBasedSlot);
 	if (slot >= initiatives[currentTurnBasedList].size()) {
-		slot = initiatives[currentTurnBasedList].size() - 1;
+		return nullptr;
 	}
 
 	return &initiatives[currentTurnBasedList][slot];
@@ -61,9 +65,13 @@ const InitiativeSlot* TurnBasedCombatManager::GetCurrentTurnBasedSlot() const
 		return nullptr;
 	}
 
+	if (currentTurnBasedSlot < 0) {
+		return nullptr;
+	}
+
 	size_t slot = static_cast<size_t>(currentTurnBasedSlot);
 	if (slot >= initiatives[currentTurnBasedList].size()) {
-		slot = initiatives[currentTurnBasedList].size() - 1;
+		return nullptr;
 	}
 
 	return &initiatives[currentTurnBasedList][slot];
@@ -147,7 +155,8 @@ void TurnBasedCombatManager::InitTurnBasedSlot()
 	currentTurnBasedActor->lastInit = core->GetGame()->GetGameTimeReal();
 
 	GameControl* gc = core->GetGameControl();
-	if (currentTurnBasedActor->GetCurrentArea()->IsVisible(currentTurnBasedActor->Pos)) {
+	Map* area = currentTurnBasedActor->GetCurrentArea();
+	if (area && area->IsVisible(currentTurnBasedActor->Pos)) {
 		gc->MoveViewportTo(currentTurnBasedActor->Pos, true);
 	}
 }
@@ -179,6 +188,7 @@ void TurnBasedCombatManager::FirstRoundStart()
 		initiatives[0][idx].haveaction = true;
 		initiatives[0][idx].havefreeaction = true;
 		initiatives[0][idx].delayaction = false;
+		initiatives[0][idx].delayCount = 0;
 		initiatives[0][idx].movesleft = 1.0f;
 		// Stop all movement at combat start
 		if (roundTurnBased == 1) {
@@ -213,7 +223,6 @@ void TurnBasedCombatManager::FirstRoundStart()
 void TurnBasedCombatManager::EndTurn()
 {
 	if (!currentTurnBasedActor ||
-	    core->GetGame()->GetCurrentAction() ||
 	    currentTurnBasedActor->InAttack()) {
 		return;
 	}
@@ -261,17 +270,17 @@ void TurnBasedCombatManager::EndTurn()
 		// delayed attack. Requires the actor to have actually been located in THIS list:
 		// otherwise currentTurnBasedSlot stays 0 and we would delay a different actor's
 		// slot. The listSize > 0 test also keeps `size() - 1` from wrapping on an empty list.
-		if (foundInList && listSize > 0 && actor->GetStance() != IE_ANI_DIE && actor->GetStance() != IE_ANI_TWITCH &&
-		    actor->GetStance() != IE_ANI_SLEEP &&
-		    !(actor->Immobile() || (actor->Modified[IE_STATE_ID] & (STATE_CANTMOVE | STATE_PANIC))) && HasMainAction() &&
-		    static_cast<size_t>(currentTurnBasedSlot) < listSize - 1) {
-			InitiativeSlot* slot = GetCurrentTurnBasedSlot();
-			if (slot && !slot->delayaction) {
-				InitiativeSlot delayedSlot = *slot;
-				delayedSlot.delayaction = true;
-				initiatives[currentTurnBasedList].erase(initiatives[currentTurnBasedList].begin() + currentTurnBasedSlot);
-				initiatives[currentTurnBasedList].push_back(delayedSlot);
-			}
+		bool canDelay = foundInList && listSize > 0 && actor->GetStance() != IE_ANI_DIE && actor->GetStance() != IE_ANI_TWITCH &&
+			actor->GetStance() != IE_ANI_SLEEP &&
+			!(actor->Immobile() || (actor->Modified[IE_STATE_ID] & (STATE_CANTMOVE | STATE_PANIC))) && HasMainAction() &&
+			static_cast<size_t>(currentTurnBasedSlot) < listSize - 1;
+		InitiativeSlot* slot = canDelay ? GetCurrentTurnBasedSlot() : nullptr;
+		if (slot && !slot->delayaction && slot->delayCount == 0) {
+			InitiativeSlot delayedSlot = *slot;
+			delayedSlot.delayaction = true;
+			delayedSlot.delayCount = 1;
+			initiatives[currentTurnBasedList].erase(initiatives[currentTurnBasedList].begin() + currentTurnBasedSlot);
+			initiatives[currentTurnBasedList].push_back(delayedSlot);
 		} else {
 			currentTurnBasedSlot++;
 		}
@@ -390,7 +399,7 @@ void TurnBasedCombatManager::UpdateTurnBased()
 
 		for (size_t list = 0; list < MAX_ATTACK_LISTS; list++) {
 			if (!initiatives[list].size()) {
-				break;
+				continue;
 			}
 			for (auto it = initiatives[list].begin(); it != initiatives[list].end();) {
 				if (!it->actor || it->actor->GetInternalFlag() & (IF_JUSTDIED | IF_REALLYDIED | IF_CLEANUP)) {
@@ -522,11 +531,15 @@ void TurnBasedCombatManager::UpdateTurnBased()
 		bool pcPresent = false;
 		for (size_t idx = 0; idx < initiatives[0].size(); idx++) {
 			Actor* actor = initiatives[0][idx].actor;
-			if (actor->Modified[IE_EA] > EA_EVILCUTOFF && actor->GetCurrentArea()->IsVisible(actor->Pos)) {
-				enemyPresent = true;
-			}
-			if (initiatives[0][idx].actor->IsPC() == true) {
-				pcPresent = true;
+			if (!actor) continue;
+			Map* area = actor->GetCurrentArea();
+			if (area && area == game->GetCurrentArea()) {
+				if (actor->Modified[IE_EA] >= EA_EVILCUTOFF && area->IsVisible(actor->Pos)) {
+					enemyPresent = true;
+				}
+				if (actor->IsPC() == true) {
+					pcPresent = true;
+				}
 			}
 		}
 
@@ -673,6 +686,9 @@ bool TurnBasedCombatManager::UseAllMainActions()
 void TurnBasedCombatManager::ToggleTurnBased()
 {
 	turnBasedEnable = !turnBasedEnable;
+	if (!turnBasedEnable) {
+		resetTurnBased();
+	}
 
 	String text;
 	if (turnBasedEnable) {

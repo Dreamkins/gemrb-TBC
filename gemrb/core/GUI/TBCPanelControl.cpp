@@ -247,11 +247,6 @@ void TBCPanelControl::DrawSelf(const Region& /*drawFrame*/, const Region& /*clip
 				}
 			}
 
-			if (slotRegion.PointInside(gc->ScreenMousePos())) {
-				gc->SetLastActor(actor);
-				gc->UpdateCursor();
-			}
-
 			Region oldClip = VideoDriver->GetScreenClip();
 			VideoDriver->SetScreenClip(&slotRegion);
 
@@ -365,6 +360,12 @@ void TBCPanelControl::DrawSelf(const Region& /*drawFrame*/, const Region& /*clip
 
 bool TBCPanelControl::OnMouseDown(const MouseEvent& me, unsigned short /*mod*/)
 {
+	mouseDownConsumed = false;
+
+	if (me.button != GEM_MB_ACTION) {
+		return false;
+	}
+
 	if (!core->IsTurnBased() || core->tbcManager.pause_before_fight) {
 		return false;
 	}
@@ -394,6 +395,7 @@ bool TBCPanelControl::OnMouseDown(const MouseEvent& me, unsigned short /*mod*/)
 				params.push_back(ScriptEngine::Parameter(IsCurrentActorSlot(actor, list)));
 				params.push_back(ScriptEngine::Parameter(actor->InParty));
 				core->GetGUIScriptEngine()->RunFunction("TBCPanel", "OnPanelClick", params);
+				mouseDownConsumed = true;
 				return true; // consume the click so GameControl doesn't also act on the map
 			}
 		}
@@ -401,6 +403,23 @@ bool TBCPanelControl::OnMouseDown(const MouseEvent& me, unsigned short /*mod*/)
 	}
 
 	// Click outside any slot: let GameControl handle it (normal map interaction).
+	return false;
+}
+
+bool TBCPanelControl::OnMouseUp(const MouseEvent& /*me*/, unsigned short /*mod*/)
+{
+	const bool consumed = mouseDownConsumed;
+	mouseDownConsumed = false;
+	return consumed && core->IsTurnBased() && !core->tbcManager.pause_before_fight;
+}
+
+bool TBCPanelControl::OnTouchDown(const TouchEvent& /*te*/, unsigned short /*mod*/)
+{
+	return false;
+}
+
+bool TBCPanelControl::OnTouchUp(const TouchEvent& /*te*/, unsigned short /*mod*/)
+{
 	return false;
 }
 
@@ -437,4 +456,8 @@ bool TBCPanelControl::IsAnimated() const
 	return core->IsTurnBased() && !core->tbcManager.pause_before_fight;
 }
 
+bool TBCPanelControl::CanLockFocus() const
+{
+	return false;
+}
 }

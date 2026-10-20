@@ -37,8 +37,15 @@ public:
 
 	void DrawSelf(const Region& drawFrame, const Region& clip) override;
 	bool OnMouseDown(const MouseEvent& me, unsigned short mod) override;
+	bool OnMouseUp(const MouseEvent& me, unsigned short mod) override;
+	bool OnTouchDown(const TouchEvent& te, unsigned short mod) override;
+	bool OnTouchUp(const TouchEvent& te, unsigned short mod) override;
 	bool OnMouseWheelScroll(const Point& delta) override;
 	bool IsAnimated() const override;
+	bool CanLockFocus() const override;
+
+private:
+	bool mouseDownConsumed = false;
 };
 
 }

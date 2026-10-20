@@ -6869,7 +6869,7 @@ int Actor::CalculateInitiative(int from)
 
 	// Base initiative: weapon speed + d10 roll
 	int spdfactor = hittingheader ? hittingheader->Speed : 5;
-	spdfactor += LuckyRoll(from, 10, 0, LR_NEGATIVE);
+	spdfactor += LuckyRoll(1, 10, from, LR_NEGATIVE);
 
 	// Haste/Slow modifiers
 	if (fxqueue.HasEffectWithParam(fx_set_haste_state_ref, 0) || fxqueue.HasEffectWithParam(fx_set_haste_state_ref, 1)) {
@@ -6903,7 +6903,8 @@ void Actor::MoveToInitiativeList()
 	// Gate on the feature being engaged (config switch AND runtime toggle), not on
 	// turnBasedEnable alone: with EnableTurnBased=0 this used to still populate the
 	// initiative lists, which drove the whole TBC state machine on vanilla settings.
-	if (!core->IsTurnBasedEnabled() || core->InCutSceneMode() || InInitiativeList() || !GetCurrentStanceAnim().size() || !GetCurrentStanceAnim()[0].first->GetFrame(0)) {
+	Map* currentArea = GetCurrentArea();
+	if (!core->IsTurnBasedEnabled() || core->InCutSceneMode() || InInitiativeList() || !currentArea || currentArea != core->GetGame()->GetCurrentArea() || !GetCurrentStanceAnim().size() || !GetCurrentStanceAnim()[0].first->GetFrame(0)) {
 		return;
 	}
 
@@ -6911,7 +6912,7 @@ void Actor::MoveToInitiativeList()
 	InitiativeSlot slot;
 	slot.actor = this;
 
-	slot.initiative = CalculateInitiative(core->tbcManager.roundTurnBased > 0 && currentSlot ? currentSlot->initiative + 1 : 1);
+	slot.initiative = CalculateInitiative(core->tbcManager.roundTurnBased > 0 && currentSlot ? currentSlot->initiative + 1 : 0);
 	slot.image = CopyPortrait(1);
 
 	core->tbcManager.initiatives[0].push_back(slot);
@@ -7769,6 +7770,8 @@ void Actor::CalculateAttackResult()
 	Actor* target = area->GetActorByGlobalID(core->tbcManager.lastTurnBasedTarget);
 	if (!target) {
 		Log(WARNING, "Actor", "Attack without valid target!");
+		ResetState();
+		core->tbcManager.UseMainAction();
 		return;
 	}
 
@@ -7801,8 +7804,12 @@ void Actor::CalculateAttackResult()
 
 	//will return false on any errors (eg, unusable weapon)
 	if (!GetCombatDetails(tohit, usedLeftHand, DamageBonus, speed, CriticalBonus, style, target)) {
+		ResetState();
+		core->tbcManager.UseMainAction();
 		return;
 	}
+
+	attackcount--;
 
 	if (PCStats) {
 		PCStats->RegisterFavourite(weaponInfo[usedLeftHand && IsDualWielding()].item->Name, FAV_WEAPON);
@@ -7821,6 +7828,7 @@ void Actor::CalculateAttackResult()
 	}
 	if (fxqueue.HasEffectWithParam(fx_puppetmarker_ref, 1) || fxqueue.HasEffectWithParam(fx_puppetmarker_ref, 2)) { // illusions can't hit
 		ResetState();
+		core->tbcManager.UseMainAction();
 		buffer.append("[Missed (puppet)]");
 		Log(COMBAT, "Attack", "{}", buffer);
 		return;
@@ -7843,6 +7851,7 @@ void Actor::CalculateAttackResult()
 			buffer.append("[Concealment Miss]");
 			Log(COMBAT, "Attack", "{}", buffer);
 			ResetState();
+			core->tbcManager.UseMainAction();
 			return;
 		}
 	}
@@ -8049,7 +8058,7 @@ void Actor::AttackTurnBased()
 		return;
 	}
 
-	if (!core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedActor != this) {
+	if (!core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedActor != this || !area) {
 		return;
 	}
 
@@ -8058,6 +8067,10 @@ void Actor::AttackTurnBased()
 		//if (!InAttack()) {
 		//	ReleaseCurrentAction();
 		//}
+		return;
+	}
+
+	if (attackcount <= 0 || attacksperround == 0) {
 		return;
 	}
 
@@ -8076,17 +8089,22 @@ void Actor::AttackTurnBased()
 		return;
 	}
 
-	if (!objects.LastTarget) {
-		Log(ERROR, "Actor", "Attack without valid target ID!");
-		return;
-	}
-
-	//get target
-	Actor* target = area->GetActorByGlobalID(objects.LastTarget);
+	ieDword targetID = core->tbcManager.lastTurnBasedTarget;
+	Actor* target = targetID ? area->GetActorByGlobalID(targetID) : nullptr;
 	if (!target) {
-		Log(WARNING, "Actor", "Attack without valid target!");
-		return;
+		targetID = objects.LastTarget;
+		if (!targetID) {
+			Log(ERROR, "Actor", "Attack without valid target ID!");
+			return;
+		}
+		target = area->GetActorByGlobalID(targetID);
+		if (!target) {
+			Log(WARNING, "Actor", "Attack without valid target!");
+			return;
+		}
 	}
+	objects.LastTarget = targetID;
+	core->tbcManager.lastTurnBasedTarget = targetID;
 
 	// also start CombatCounter if a pc is attacked
 	if (!InParty && target->IsPartyMember()) {
@@ -8113,7 +8131,6 @@ void Actor::AttackTurnBased()
 
 
 	lastInit = core->GetGame()->GetGameTimeReal();
-	core->tbcManager.lastTurnBasedTarget = objects.LastTarget;
 
 	//UpdateModalState(gameTime);
 	PlaySwingSound(wi);
@@ -9864,7 +9881,7 @@ HCStrings Actor::SetEquippedQuickSlot(int slot, int header)
 		// this actor has already spent attacks. The old condition also tested the
 		// GLOBAL currentTurnBasedList, so as soon as any actor took a second attack
 		// the whole fight silently refused every quickslot change, for everyone.
-		if (attackcount != attacksperround) {
+		if (!CanSwitchQuickSlot()) {
 			Log(DEBUG, "Actor", "SetEquippedQuickSlot: actor already attacked this round");
 			return HCStrings::count;
 		}

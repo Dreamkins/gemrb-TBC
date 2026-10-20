@@ -11030,11 +11030,9 @@ static PyObject* GemRB_SetEquippedQuickSlot(PyObject* /*self*/, PyObject* args)
 		Py_RETURN_NONE;
 	}
 
-	// TBC: Switching weapons costs a free action. Charged only now that the equip is
-	// known to be allowed - spending it up front burned the action on a cursed-item
-	// refusal, and it debited whichever actor was on turn rather than this one.
-	if (core->IsTurnBased() && actor->InInitiativeList()) {
-		if (!core->tbcManager.SpendFreeAction(actor)) {
+	bool tbcFreeAction = core->IsTurnBased() && actor->InInitiativeList();
+	if (tbcFreeAction && core->tbcManager.currentTurnBasedActor) {
+		if (actor != core->tbcManager.currentTurnBasedActor || !core->tbcManager.HasFreeAction() || !actor->CanSwitchQuickSlot()) {
 			Py_RETURN_NONE;
 		}
 	}
@@ -11060,6 +11058,9 @@ static PyObject* GemRB_SetEquippedQuickSlot(PyObject* /*self*/, PyObject* args)
 		if (reequip) {
 			int shieldSlot = actor->inventory.GetShieldSlot();
 			if (shieldSlot != -1) actor->inventory.EquipItem(shieldSlot);
+		}
+		if (tbcFreeAction) {
+			core->tbcManager.SpendFreeAction(actor);
 		}
 	} else {
 		// error occurred
@@ -11205,15 +11206,12 @@ static PyObject* GemRB_SetModalState(PyObject* /*self*/, PyObject* args)
 	GET_GAME();
 	GET_ACTOR_GLOBAL();
 
-	// TBC: Modal actions cost action points. Entering a modal costs the main action
-	// (free action for a thief going into stealth); leaving one costs a free action,
-	// which the modal table promises for every deactivation - the old guard skipped
-	// the deactivation case entirely. Both charges go through Spend*, which debits
-	// THIS actor instead of whichever actor happens to be on turn.
-	bool enteringModal = (Modal) state != Modal::None && actor->Modal.State != (Modal) state;
-	bool leavingModal = (Modal) state == Modal::None && actor->Modal.State != Modal::None;
+	Modal modal = (Modal) state;
+	bool togglingOff = actor->IsSelected() && modal != Modal::None && actor->Modal.State == modal;
+	bool enteringModal = modal != Modal::None && actor->Modal.State != modal;
+	bool leavingModal = (modal == Modal::None || togglingOff) && actor->Modal.State != Modal::None;
 	if ((enteringModal || leavingModal) && core->IsTurnBased() && actor->InInitiativeList()) {
-		bool thiefStealth = enteringModal && (Modal) state == Modal::Stealth && actor->GetThiefLevel() > 0;
+		bool thiefStealth = enteringModal && modal == Modal::Stealth && actor->GetThiefLevel() > 0;
 		if (thiefStealth || leavingModal) {
 			if (!core->tbcManager.SpendFreeAction(actor)) {
 				Py_RETURN_NONE;

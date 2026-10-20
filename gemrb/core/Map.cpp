@@ -750,7 +750,7 @@ void Map::UpdateScripts()
 
 		if (core->IsTurnBased() && actor->InInitiativeList()) {
 			if (core->tbcManager.currentTurnBasedActor == actor) {
-				bool notPlayerControl = actor->Immobile() || (actor->GetStat(IE_EA) != EA_PC && actor->GetStat(IE_EA) != EA_FAMILIAR) || (actor->Modified[IE_STATE_ID] & (STATE_MINDLESS ^ STATE_BERSERK)) || (actor->GetBase(IE_STATE_ID) & (STATE_MINDLESS ^ STATE_BERSERK));
+				bool notPlayerControl = actor->Immobile() || (actor->GetStat(IE_EA) != EA_PC && actor->GetStat(IE_EA) != EA_FAMILIAR) || (actor->Modified[IE_STATE_ID] & (STATE_MINDLESS | STATE_BERSERK)) || (actor->GetBase(IE_STATE_ID) & (STATE_MINDLESS | STATE_BERSERK));
 				bool cantMove = core->tbcManager.opportunity || actor->GetRandomBackoff() || !actor->InMove() || actor->Immobile() || !actor->GetPath() || (actor->Modified[IE_STATE_ID] & STATE_CANTMOVE);
 				bool notAttackNow = !actor->InAttack();
 				if (notPlayerControl && cantMove && notAttackNow) {

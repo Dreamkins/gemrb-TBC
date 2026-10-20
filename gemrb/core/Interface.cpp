@@ -723,9 +723,11 @@ GameControl* Interface::StartGameControl()
 	gamectrl->AssignScriptingRef(0, "GC");
 
 	// turn-based combat initiative panel (HUD overlay); inert unless IsTurnBased()
-	Region tbcFrame(0, 0, config.Width, 130);
-	TBCPanelControl* tbcPanel = new TBCPanelControl(tbcFrame);
-	gamectrl->AddSubviewInFrontOfView(tbcPanel);
+	if (config.EnableTurnBased) {
+		Region tbcFrame(0, 0, config.Width, 130);
+		TBCPanelControl* tbcPanel = new TBCPanelControl(tbcFrame);
+		gamectrl->AddSubviewInFrontOfView(tbcPanel);
+	}
 
 	return gamectrl;
 }
@@ -2537,7 +2539,7 @@ void Interface::LoadGame(Holder<SaveGame> sg, GAMVersion override)
 	// to swap out, so any stale entry dangles. IsTurnBased() is false before the
 	// first EndTurn (the clock is still pinned at 0), which is exactly when stale
 	// pointers are most likely to survive.
-	if (IsTurnBasedEnabled()) {
+	if (config.EnableTurnBased) {
 		resetTurnBased();
 	}
 	gamedata->SaveAllStores();
@@ -4048,7 +4050,7 @@ PauseState Interface::TogglePause() const
 	if (core->IsTurnBased()) {
 		Actor* actor = core->tbcManager.currentTurnBasedActor;
 		if (actor) {
-			bool notPlayerControl = actor->Immobile() || (actor->GetStat(IE_EA) != EA_PC && actor->GetStat(IE_EA) != EA_FAMILIAR) || (actor->Modified[IE_STATE_ID] & (STATE_MINDLESS ^ STATE_BERSERK));
+			bool notPlayerControl = actor->Immobile() || (actor->GetStat(IE_EA) != EA_PC && actor->GetStat(IE_EA) != EA_FAMILIAR) || (actor->Modified[IE_STATE_ID] & (STATE_MINDLESS | STATE_BERSERK));
 			if (actor->lastInit && game->GetGameTimeReal() - actor->lastInit > 4 && !notPlayerControl && !actor->InMove() && !actor->InAttack()) {
 				core->EndTurn();
 			}

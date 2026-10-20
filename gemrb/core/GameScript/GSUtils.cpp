@@ -1540,6 +1540,11 @@ void AttackCore(Scriptable* Sender, Scriptable* target, int flags)
 		return;
 	}
 
+	if (core->IsTurnBased() && attacker->InInitiativeList() && !attacker->GetCurrentArea()) {
+		Sender->ReleaseCurrentAction();
+		return;
+	}
+
 	// TBC: cannot attack while standing on an ally's cell
 	if (core->IsTurnBased() && attacker->InInitiativeList()) {
 		Map* area = attacker->GetCurrentArea();
@@ -1652,6 +1657,9 @@ void AttackCore(Scriptable* Sender, Scriptable* target, int flags)
 
 	Sender->objects.LastTarget = target->GetGlobalID();
 	Sender->objects.LastTargetPersistent = Sender->objects.LastTarget;
+	if (core->IsTurnBased()) {
+		core->tbcManager.lastTurnBasedTarget = Sender->objects.LastTarget;
+	}
 	attacker->PerformAttack(core->GetGame()->GetGameTime());
 }
 
@@ -2367,6 +2375,9 @@ void SpellCore(Scriptable* Sender, Action* parameters, int flags)
 	// handle also held enemies, since their scripts still run
 	if (act && act->Immobile()) {
 		Sender->ReleaseCurrentAction();
+		if (core->IsTurnBased() && act->GetStance() == IE_ANI_CAST) {
+			act->SetStance(IE_ANI_READY);
+		}
 		return;
 	}
 
@@ -2388,11 +2399,15 @@ void SpellCore(Scriptable* Sender, Action* parameters, int flags)
 	}
 
 	Actor* target = Scriptable::As<Actor>(tar);
-	if (act && tar &&
-	    (((act->IsPC() || target->IsPC()) && EARelation(act, target) == EAR_HOSTILE) || // attack or attacked PC
-	     act->InInitiativeList() || target->InInitiativeList())) { // for neutrals
-		act->MoveToInitiativeList();
-		target->MoveToInitiativeList();
+	if (act && tar) {
+		bool hostile = target && (act->IsPC() || target->IsPC()) && EARelation(act, target) == EAR_HOSTILE;
+		bool inInitiative = act->InInitiativeList() || (target && target->InInitiativeList());
+		if (hostile || inInitiative) {
+			act->MoveToInitiativeList();
+			if (target) {
+				target->MoveToInitiativeList();
+			}
+		}
 	}
 
 	dist = GetSpellDistance(spellResRef, Sender, tar->Pos);
@@ -2406,6 +2421,9 @@ void SpellCore(Scriptable* Sender, Action* parameters, int flags)
 		     (tar->GetInternalFlag() & (IF_ACTIVE | IF_VISIBLE)) != (IF_ACTIVE | IF_VISIBLE) ||
 		     target->GetStat(IE_AVATARREMOVAL))) {
 			Sender->ReleaseCurrentAction();
+			if (core->IsTurnBased() && act->GetStance() == IE_ANI_CAST) {
+				act->SetStance(IE_ANI_READY);
+			}
 			Sender->AddTrigger(TriggerEntry(trigger_targetunreachable, tar->GetGlobalID()));
 			displaymsg->DisplayConstantStringName(HCStrings::NoSeeNoCast, GUIColors::RED, Sender);
 			core->Autopause(AUTOPAUSE::NOTARGET, Sender);
@@ -2491,6 +2509,9 @@ void SpellCore(Scriptable* Sender, Action* parameters, int flags)
 		// some kind of error
 		parameters->int2Parameter = 0;
 		Sender->ReleaseCurrentAction();
+		if (act && core->IsTurnBased() && act->GetStance() == IE_ANI_CAST) {
+			act->SetStance(IE_ANI_READY);
+		}
 		return;
 	} else if (duration > 0) {
 		if (parameters->int2Parameter) {
@@ -2564,6 +2585,9 @@ void SpellPointCore(Scriptable* Sender, Action* parameters, int flags)
 		// handle also held enemies, since their scripts still run
 		if (act->Immobile()) {
 			Sender->ReleaseCurrentAction();
+			if (core->IsTurnBased() && act->GetStance() == IE_ANI_CAST) {
+				act->SetStance(IE_ANI_READY);
+			}
 			return;
 		}
 
@@ -2641,6 +2665,9 @@ void SpellPointCore(Scriptable* Sender, Action* parameters, int flags)
 	if (duration == -1) {
 		// some kind of error
 		Sender->ReleaseCurrentAction();
+		if (act && core->IsTurnBased() && act->GetStance() == IE_ANI_CAST) {
+			act->SetStance(IE_ANI_READY);
+		}
 		return;
 	} else if (duration > 0) {
 		if (parameters->int2Parameter) {

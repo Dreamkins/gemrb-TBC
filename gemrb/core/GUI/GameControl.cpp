@@ -796,7 +796,9 @@ bool GameControl::OnKeyPress(const KeyboardEvent& Key, unsigned short mod)
 			}
 			break;
 		case ' ': //soft pause
-			core->TogglePause();
+			if (!core->IsTurnBased()) {
+				core->TogglePause();
+			}
 			break;
 		case '=':
 			SelectActor(-1);

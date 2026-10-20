@@ -2375,6 +2375,10 @@ void GameScript::Unlock(Scriptable* Sender, Action* parameters)
 		return;
 	}
 
+	if (tar->Type != ST_DOOR && tar->Type != ST_CONTAINER) {
+		return;
+	}
+
 	Actor* actor = Scriptable::As<Actor>(Sender);
 	if (core->IsTurnBased() && actor && actor->InInitiativeList()) {
 		if (actor != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0 || !core->tbcManager.HasMainAction()) {
@@ -2461,8 +2465,6 @@ void GameScript::RemoveTraps(Scriptable* Sender, Action* parameters)
 		if (actor != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0 || !core->tbcManager.HasMainAction()) {
 			return;
 		}
-		core->tbcManager.UseMainAction();
-		actor->RemoveFromAdditionInitiativeLists();
 	}
 
 	Scriptable* tar = GetScriptableFromObject(Sender, parameters);
@@ -2513,6 +2515,10 @@ void GameScript::RemoveTraps(Scriptable* Sender, Action* parameters)
 	actor->SetOrientation(actor->Pos, *p, false);
 	if (distance <= MAX_OPERATING_DISTANCE) {
 		if (flags) {
+			if (core->IsTurnBased() && actor->InInitiativeList()) {
+				core->tbcManager.UseMainAction();
+				actor->RemoveFromAdditionInitiativeLists();
+			}
 			switch (type) {
 				case ST_DOOR:
 					door->TryDisarm(actor);
@@ -2553,14 +2559,10 @@ void GameScript::PickLock(Scriptable* Sender, Action* parameters)
 		return;
 	}
 
-	// Charge the action only once the target is known to be valid: doing it first
-	// burned the actor's main action even when the script named no lock at all.
 	if (core->IsTurnBased() && actor->InInitiativeList()) {
 		if (actor != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0 || !core->tbcManager.HasMainAction()) {
 			return;
 		}
-		core->tbcManager.UseMainAction();
-		actor->RemoveFromAdditionInitiativeLists();
 	}
 	unsigned int distance;
 	const Point* p;
@@ -2591,6 +2593,10 @@ void GameScript::PickLock(Scriptable* Sender, Action* parameters)
 	actor->SetOrientation(actor->Pos, *p, false);
 	if (distance <= MAX_OPERATING_DISTANCE) {
 		if (locked) {
+			if (core->IsTurnBased() && actor->InInitiativeList()) {
+				core->tbcManager.UseMainAction();
+				actor->RemoveFromAdditionInitiativeLists();
+			}
 			lockMount->TryPickLock(actor);
 		}
 	} else {
@@ -2615,26 +2621,13 @@ void GameScript::OpenDoor(Scriptable* Sender, Action* parameters)
 
 	bool wasLocked = door->Flags & DOOR_LOCKED;
 
-	// TBC: opening unlocked door = free action, locked door (picking) = main action.
-	// Gate BEFORE touching the door - TryUnlock consumes and deletes the key, so
-	// charging afterwards destroyed a key for an action the turn-based rules then
-	// rejected. CloseDoor below already orders it this way.
-	if (core->IsTurnBased() && actor && actor->InInitiativeList()) {
+	bool tbcAction = core->IsTurnBased() && actor && actor->InInitiativeList();
+	if (tbcAction) {
 		if (actor != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0) {
 			return;
 		}
-		if (wasLocked) {
-			// Door was locked - use main action
-			if (!core->tbcManager.HasMainAction()) {
-				return;
-			}
-			core->tbcManager.UseMainAction();
-			actor->RemoveFromAdditionInitiativeLists();
-		} else {
-			// Door was unlocked - use free action
-			if (!core->tbcManager.UseFreeAction()) {
-				return;
-			}
+		if (wasLocked ? !core->tbcManager.HasMainAction() : !core->tbcManager.HasFreeAction()) {
+			return;
 		}
 	}
 
@@ -2642,6 +2635,15 @@ void GameScript::OpenDoor(Scriptable* Sender, Action* parameters)
 		actor->SetModal(Modal::None);
 		if (!door->TryUnlock(actor)) {
 			return;
+		}
+	}
+
+	if (tbcAction) {
+		if (wasLocked) {
+			core->tbcManager.UseMainAction();
+			actor->RemoveFromAdditionInitiativeLists();
+		} else {
+			core->tbcManager.UseFreeAction();
 		}
 	}
 
@@ -2659,12 +2661,11 @@ void GameScript::CloseDoor(Scriptable* Sender, Action* parameters)
 	// see comments in OpenDoor above
 	Actor* actor = Scriptable::As<Actor>(Sender);
 
-	if (core->IsTurnBased() && actor && actor->InInitiativeList()) {
+	bool tbcAction = core->IsTurnBased() && actor && actor->InInitiativeList();
+	if (tbcAction) {
 		if (actor != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0 || !core->tbcManager.HasMainAction()) {
 			return;
 		}
-		core->tbcManager.UseMainAction();
-		actor->RemoveFromAdditionInitiativeLists();
 	}
 
 	if (actor) {
@@ -2672,6 +2673,11 @@ void GameScript::CloseDoor(Scriptable* Sender, Action* parameters)
 		if (!door->TryUnlock(actor)) {
 			return;
 		}
+	}
+
+	if (tbcAction) {
+		core->tbcManager.UseMainAction();
+		actor->RemoveFromAdditionInitiativeLists();
 	}
 
 	door->SetDoorOpen(false, false, 0);
@@ -5286,6 +5292,7 @@ void GameScript::AttackOneRound(Scriptable* Sender, Action* parameters)
 	Actor* actor = Scriptable::As<Actor>(Sender);
 
 	if (core->IsTurnBased() && actor->GetStat(IE_EA) == EA_PC) {
+		Sender->ReleaseCurrentAction();
 		return;
 	}
 	//using auto target!
@@ -7026,7 +7033,9 @@ void GameScript::UseItem(Scriptable* Sender, Action* parameters)
 		return;
 	}
 
-	if (core->IsTurnBased() && act->InInitiativeList()) {
+	bool tbcAction = core->IsTurnBased() && act->InInitiativeList();
+	bool tbcFreeAction = false;
+	if (tbcAction) {
 		if (act != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0) {
 			return;
 		}
@@ -7041,19 +7050,24 @@ void GameScript::UseItem(Scriptable* Sender, Action* parameters)
 			}
 		}
 		// Scrolls use main action (like casting a spell), other quick items use free action
-		if (isQuickSlot && itemType != 11) { // 11 = IT_SCROLL
-			if (!core->tbcManager.UseFreeAction()) {
-				return;
-			}
-		} else {
-			if (!core->tbcManager.UseMainAction()) {
-				return;
-			}
+		tbcFreeAction = isQuickSlot && itemType != 11; // 11 = IT_SCROLL
+		if (tbcFreeAction ? !core->tbcManager.HasFreeAction() : !core->tbcManager.HasMainAction()) {
+			return;
 		}
 	}
 
 	Sender->ReleaseCurrentAction();
-	act->UseItem(Slot, header, tar, flags);
+	if (!act->UseItem(Slot, header, tar, flags)) {
+		return;
+	}
+	if (tbcAction) {
+		if (tbcFreeAction) {
+			core->tbcManager.UseFreeAction();
+		} else {
+			core->tbcManager.UseMainAction();
+		}
+		act->RemoveFromAdditionInitiativeLists();
+	}
 }
 
 void GameScript::UseItemPoint(Scriptable* Sender, Action* parameters)
@@ -7102,7 +7116,9 @@ void GameScript::UseItemPoint(Scriptable* Sender, Action* parameters)
 		return;
 	}
 
-	if (core->IsTurnBased() && act->InInitiativeList()) {
+	bool tbcAction = core->IsTurnBased() && act->InInitiativeList();
+	bool tbcFreeAction = false;
+	if (tbcAction) {
 		if (act != core->tbcManager.currentTurnBasedActor || core->tbcManager.currentTurnBasedList != 0) {
 			return;
 		}
@@ -7122,21 +7138,26 @@ void GameScript::UseItemPoint(Scriptable* Sender, Action* parameters)
 			}
 		}
 		// Scrolls use main action (like casting a spell), other quick items use free action
-		if (isQuickSlot && itemType != 11) { // 11 = IT_SCROLL
-			if (!core->tbcManager.UseFreeAction()) {
-				return;
-			}
-		} else {
-			if (!core->tbcManager.UseMainAction()) {
-				return;
-			}
+		tbcFreeAction = isQuickSlot && itemType != 11; // 11 = IT_SCROLL
+		if (tbcFreeAction ? !core->tbcManager.HasFreeAction() : !core->tbcManager.HasMainAction()) {
+			return;
 		}
 	}
 
 	Point targetPos = parameters->pointParameter;
 
 	Sender->ReleaseCurrentAction();
-	act->UseItemPoint(Slot, header, targetPos, flags);
+	if (!act->UseItemPoint(Slot, header, targetPos, flags)) {
+		return;
+	}
+	if (tbcAction) {
+		if (tbcFreeAction) {
+			core->tbcManager.UseFreeAction();
+		} else {
+			core->tbcManager.UseMainAction();
+		}
+		act->RemoveFromAdditionInitiativeLists();
+	}
 }
 
 //addfeat will be able to remove feats too

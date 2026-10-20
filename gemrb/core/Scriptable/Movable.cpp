@@ -30,6 +30,8 @@
 #include "GameScript/GSUtils.h"
 #include "GameScript/GameScript.h"
 
+#include <cmath>
+
 namespace GemRB {
 
 Point Movable::GetMostLikelyPosition() const
@@ -348,10 +350,10 @@ void Movable::DoStep(unsigned int walkScale, ieDword time)
 		// purge), so resolve the slot once and tolerate it being gone.
 		auto* tbcSlot = core->GetCurrentTurnBasedSlot();
 		if (tbcSlot) {
-			float dist = SquaredDistance(Pos, newPos);
-			int speed = actor->GetSpeed() ? gamedata->GetStepTime() / actor->GetSpeed() : 0;
+			float dist = std::sqrt(static_cast<float>(SquaredDistance(Pos, newPos)));
+			float speed = actor->GetSpeed() ? static_cast<float>(gamedata->GetStepTime()) / actor->GetSpeed() : 0.0f;
 			if (speed > 0) {
-				tbcSlot->movesleft -= dist / (speed * core->Time.defaultTicksPerSec * core->Time.round_sec * 10);
+				tbcSlot->movesleft -= dist / (speed * core->Time.defaultTicksPerSec * core->Time.round_sec);
 			}
 
 			if (tbcSlot->movesleft <= 0) {

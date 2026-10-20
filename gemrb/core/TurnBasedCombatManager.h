@@ -39,6 +39,7 @@ struct InitiativeSlot {
 	bool haveaction = true; // Has action available this turn
 	bool havefreeaction = true; // Has free action available this turn
 	bool delayaction = false; // Action was delayed
+	int delayCount = 0;
 	int CurrentActionStateDescrease = 0; // Timer for action state decrease
 };
 
@@ -127,7 +128,7 @@ public:
 	// (e.g. the environment phase), so the frozen-time abstraction stays in effect.
 	bool IsTurnBased() const
 	{
-		return currentTurnBasedActor != nullptr || timeTurnBased < timeTurnBasedNeed;
+		return turnBasedEnable && (currentTurnBasedActor != nullptr || timeTurnBased < timeTurnBasedNeed);
 	}
 
 	// Get current slot info

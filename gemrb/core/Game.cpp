@@ -1452,12 +1452,12 @@ void Game::AdvanceTime(ieDword add, bool fatigue)
 {
 	static EffectRef fx_set_regenerating_state_ref = { "State:Regenerating", -1 };
 
-	ieDword hours = GetGameTime() / core->Time.hour_size;
+	ieDword hours = GameTime / core->Time.hour_size;
 	GameTime += add;
 	// if rest until healed is in action, skip most of this function
 	bool healOnly = core->GetDictionary().Get("Heal Party on Rest", 0) == 99;
 
-	ieDword hours2 = GetGameTime() / core->Time.hour_size;
+	ieDword hours2 = GameTime / core->Time.hour_size;
 	Map* map = GetCurrentArea();
 	if (hours != hours2 && !healOnly) {
 		//asking for a new weather when the hour changes

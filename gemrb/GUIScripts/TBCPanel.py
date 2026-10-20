@@ -21,43 +21,10 @@
 # Rendering (DrawSelf) and event dispatch (OnMouseDown/OnMouseWheelScroll)
 # are handled by C++ TBCPanelControl. This module provides the Python-side
 # interaction logic: actor selection on click (OnPanelClick) and panel scroll
-# adjustment (OnPanelMouseWheelScroll). The panel window is auto-created by
-# Interface::StartGameControl; Open() is available for explicit creation.
+# adjustment (OnPanelMouseWheelScroll).
 
 import GemRB
 from GUIDefines import *
-
-TBC_PANEL_WINDOW = 0x1000
-TBC_PANEL_CONTROL = 0x1001
-
-# Height of the top HUD band that the panel occupies (must match TBCPanelControl.cpp).
-TBC_PANEL_HEIGHT = 130
-
-Window = None
-Panel = None
-
-def Open():
-	"""Create the turn-based combat initiative panel as a top-level HUD window."""
-	global Window, Panel
-	if Window is not None:
-		return Window
-
-	width = GemRB.GetSystemVariable(SV_WIDTH)
-	height = GemRB.GetSystemVariable(SV_HEIGHT)
-
-	# real-pixel window sitting above the game viewport
-	Window = GemRB.CreateView(TBC_PANEL_WINDOW, IE_GUI_INVALID, (0, 0, width, height))
-	Panel = Window.CreateSubview(TBC_PANEL_CONTROL, IE_GUI_TBCPANEL, (0, 0, width, TBC_PANEL_HEIGHT))
-	return Window
-
-def Close():
-	"""Destroy the panel window."""
-	global Window, Panel
-	if Window is None:
-		return
-	GemRB.RemoveView(Window, True)
-	Window = None
-	Panel = None
 
 
 # -- Python interaction handlers (called by C++ TBCPanelControl dispatch) --
@@ -72,16 +39,16 @@ def OnPanelClick(actorGlobalID, isCurrentActor, inParty):
 	Parameters:
 		actorGlobalID: Global ID of the clicked actor, or -1 if none.
 		isCurrentActor: True if the clicked actor has the current turn.
-		inParty: True if the clicked actor is a party member.
+		inParty: Party slot of the clicked actor, or 0 for non-party actors.
 	"""
 	if actorGlobalID == -1:
 		return
 
-	# Mark target: non-party actors and non-current actors become targets
-	if not inParty and not isCurrentActor:
+	if inParty:
+		GemRB.GameSelectPC(inParty, 1, SELECT_REPLACE)
+	elif not isCurrentActor:
 		GemRB.SetTurnBasedTarget(actorGlobalID)
 
-	# Update cursor/selection to the clicked actor
 	GemRB.GameControlLocateActor(actorGlobalID)
 
 

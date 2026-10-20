@@ -841,7 +841,7 @@ public:
 	/* check in initiative list */
 	bool InInitiativeList();
 	/* calculate initiative */
-	int CalculateInitiative(int from = 1);
+	int CalculateInitiative(int from = 0);
 	void MoveToInitiativeList();
 	/* starts combat round*/
 	void InitRound(ieDword gameTime);
@@ -958,6 +958,7 @@ public:
 	int GetQuickSlot(int slot) const;
 	/* Sets equipped Quick slot, if header is -1, then use the current one */
 	HCStrings SetEquippedQuickSlot(int slot, int header);
+	bool CanSwitchQuickSlot() const { return attackcount == attacksperround; }
 	/* Uses an item on the target or point */
 	bool TryUsingMagicDevice(const Item* item, int header);
 	bool RequiresUMD(const Item* item) const;

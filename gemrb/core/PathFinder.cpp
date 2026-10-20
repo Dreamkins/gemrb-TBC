@@ -36,6 +36,8 @@
 
 #include "PathFinder.h"
 
+#include "globals.h"
+
 #include "BucketPriorityQueue.h"
 #include "Debug.h"
 #include "GameData.h"
@@ -360,7 +362,11 @@ Path Map::FindPath(const Point& s, const Point& d, const unsigned int size, unsi
 
 			// If there's an actor, check it can be bumped away
 			const auto navmapCellTraversability = traversabilityCache.GetCellData(nmptChild.y * mapSize.w * 16 + nmptChild.x);
-			const bool childIsUnbumpable = navmapCellTraversability.occupyingActor != caller && navmapCellTraversability.state >= blockingTraversabilityValue;
+			bool childIsUnbumpable = navmapCellTraversability.occupyingActor != caller && navmapCellTraversability.state >= blockingTraversabilityValue;
+			if (childIsUnbumpable && core->IsTurnBased() && caller && navmapCellTraversability.occupyingActor &&
+			    EARelation(caller, navmapCellTraversability.occupyingActor) != EAR_HOSTILE) {
+				childIsUnbumpable = false;
+			}
 			if (childIsUnbumpable) continue;
 
 			SearchmapPoint smptCurrent2 { nmptCurrent };
